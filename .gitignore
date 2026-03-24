@@ -57,5 +57,5 @@ frontend/.env.test.local
 frontend/.env.production.local
 
 # basic codes
-scorecard
-code_all_ipynbs
+scorecard/
+code_all_ipynbs/
