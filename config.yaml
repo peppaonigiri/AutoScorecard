@@ -1,13 +1,13 @@
 # AutoModeling 全局配置
 
 database:
-  # host: localhost
-  # port: 5432
-  # user: postgres
-  # password: "123456"
-  # database: scorecard
+  host: localhost
+  port: 5432
+  user: postgres
+  password: "123456"
+  database: scorecard
   # postgresql://postgres:123456@localhost:5432/scorecard
-  sqlite_db: "./scorecard.db"  # 临时回退到 SQLite 确保开发进度
+  # sqlite_db: "./scorecard.db"  # 临时回退到 SQLite 确保开发进度
 
 server:
   host: 0.0.0.0

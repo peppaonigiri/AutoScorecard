@@ -12,11 +12,21 @@ _config_path = os.path.join(BASE_DIR, 'config.yaml')
 with open(_config_path, 'r', encoding='utf-8') as f:
     _cfg = yaml.safe_load(f)
 
-# 数据库配置（临时使用 SQLite）
-SQLITE_DB_PATH = _cfg['database'].get('sqlite_db', './scorecard.db')
-if not os.path.isabs(SQLITE_DB_PATH):
-    SQLITE_DB_PATH = os.path.join(BASE_DIR, SQLITE_DB_PATH)
-DATABASE_URL = f"sqlite:///{SQLITE_DB_PATH}"
+# 数据库配置
+if _cfg['database'].get('password'):
+    # 检测到密码配置，使用 PostgreSQL
+    db_u = _cfg['database'].get('user', 'postgres')
+    db_p = _cfg['database'].get('password')
+    db_h = _cfg['database'].get('host', 'localhost')
+    db_port = _cfg['database'].get('port', 5432)
+    db_n = _cfg['database'].get('database', 'scorecard')
+    DATABASE_URL = f"postgresql://{db_u}:{db_p}@{db_h}:{db_port}/{db_n}"
+else:
+    # 否则使用 SQLite
+    SQLITE_DB_PATH = _cfg['database'].get('sqlite_db', './scorecard.db')
+    if not os.path.isabs(SQLITE_DB_PATH):
+        SQLITE_DB_PATH = os.path.join(BASE_DIR, SQLITE_DB_PATH)
+    DATABASE_URL = f"sqlite:///{SQLITE_DB_PATH}"
 
 # 服务器配置
 SERVER_HOST = _cfg['server']['host']

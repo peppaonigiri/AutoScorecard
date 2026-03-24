@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Database
+*.db
+*.sqlite3
+backend/scorecard.db.bak
+
+# Logs
+*.log
+backend/backend.log
+
+# Storage (Ignore all sub-folders content but keep folders/placeholders)
+storage/uploads/*
+storage/models/*
+storage/reports/*
+!storage/uploads/.gitkeep
+!storage/models/.gitkeep
+!storage/reports/.gitkeep
+
+# Environments
+.env
+.venv
+venv/
+ENV/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
