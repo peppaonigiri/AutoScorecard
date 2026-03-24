@@ -1,0 +1,26 @@
+# AutoModeling 全局配置
+
+database:
+  # host: localhost
+  # port: 5432
+  # user: postgres
+  # password: "123456"
+  # database: scorecard
+  # postgresql://postgres:123456@localhost:5432/scorecard
+  sqlite_db: "./scorecard.db"  # 临时回退到 SQLite 确保开发进度
+
+server:
+  host: 0.0.0.0
+  port: 8000
+  debug: true
+
+storage:
+  upload_dir: ./storage/uploads
+  model_dir: ./storage/models
+  report_dir: ./storage/reports
+
+modeling:
+  default_dep: label
+  default_max_depth: 6
+  default_n_trials: 100
+  default_model_type: xgb
