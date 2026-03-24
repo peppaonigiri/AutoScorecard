@@ -55,3 +55,7 @@ frontend/.env.local
 frontend/.env.development.local
 frontend/.env.test.local
 frontend/.env.production.local
+
+# basic codes
+scorecard
+code_all_ipynbs
