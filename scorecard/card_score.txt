@@ -1,0 +1,10 @@
+def card_score(pred, P=660, Q=20, PDO=50, good_weight=1):
+    '''
+    根据概率1返回卡评分
+    pred:概率(array或scalar); Q:设定的Odds比率; P:比率Q时的分数
+    PDO:比率为2Q时分值增加量; good_weight:好客户抽样比例
+    '''
+    Odds = (1-pred)*good_weight/pred
+    B = -PDO/np.log(2)
+    A = P + B*np.log(Q)
+    return A - B*np.log(Odds)
