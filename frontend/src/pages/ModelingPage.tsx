@@ -98,6 +98,13 @@ const ModelingPage: React.FC = () => {
                 setTaskStatus(res.status);
                 setProgress(Math.floor(res.progress));
 
+                // 发送心跳信号，告知后端我还在线
+                try {
+                    await api.post(`/tasks/${tid}/heartbeat`);
+                } catch (hErr) {
+                    console.warn('Heartbeat failed', hErr);
+                }
+
                 if (res.status === 'completed') {
                     clearInterval(timerRef.current);
                     setTaskResult(res.result);

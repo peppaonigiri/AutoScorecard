@@ -79,6 +79,7 @@ class Task(Base):
     params = Column(JSON, default=dict)  # 任务参数
     result = Column(JSON, default=dict)  # 任务结果
     error_msg = Column(Text, default='')
+    last_heartbeat = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -186,3 +187,29 @@ class StrategyMonitoringLog(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     project = relationship("Project")
+
+class ModelReport(Base):
+    """模型报告"""
+    __tablename__ = 'model_reports'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(Integer, ForeignKey('projects.id'), nullable=False)
+    model_result_id = Column(Integer, ForeignKey('model_results.id'), nullable=False)
+    
+    # 报告内容 (JSON格式存储，用于前端展示)
+    data_summary = Column(JSON, default=dict)      # info_df
+    performance_eval = Column(JSON, default=dict)  # eval_df
+    feature_importance = Column(JSON, default=list) # ipt_iv_df
+    bin_details = Column(JSON, default=list)      # iv_detail_df
+    lift_table = Column(JSON, default=dict)       # lift_df
+    psi_train_oot = Column(JSON, default=dict)    # psi_df_tv_o
+    psi_monthly = Column(JSON, default=dict)      # psi_df_month
+    
+    # 导出文件路径
+    file_path = Column(String(500), default='')
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # 关联
+    project = relationship('Project')
+    model_result = relationship('ModelResult')

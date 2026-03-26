@@ -107,6 +107,21 @@ class DataStatsResponse(BaseModel):
     numeric_stats: Dict[str, Dict[str, Any]]  # {col: {mean, std, min, max, ...}}
     label_distribution: Optional[Dict[str, int]] = None
 
+class BinningExplorerRequest(BaseModel):
+    variable: str
+    label_col: str = "label"
+    method: str = "decision_tree" # 'quantile', 'decision_tree', 'chi'
+    n_bins: int = 10
+    min_samples_leaf: float = 0.05
+    max_leaf_nodes: int = 10
+
+class AutoMiningRequest(BaseModel):
+    dataset_id: int
+    label_col: str = "label"
+    max_vars: int = 1
+    min_lift: float = 1.2
+    min_bad_rate: float = 0.05
+
 
 # ========== 特征工程 ==========
 
@@ -191,7 +206,7 @@ class TaskResponse(BaseModel):
     status: str
     progress: float
     params: Dict[str, Any]
-    result: Dict[str, Any]
+    result: Any
     error_msg: str
     created_at: datetime
     updated_at: datetime

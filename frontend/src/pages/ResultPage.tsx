@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Table, Descriptions, Typography, Row, Col, message, Switch, Space, Tag } from 'antd';
-import { CheckCircleOutlined } from '@ant-design/icons';
+import { Card, Table, Descriptions, Typography, Row, Col, message, Switch, Space, Tag, Button, Modal, Tabs, Progress } from 'antd';
+import { CheckCircleOutlined, FileTextOutlined, DownloadOutlined } from '@ant-design/icons';
 import api from '../services/api';
 import { useAppStore } from '../stores';
 
@@ -12,6 +12,13 @@ const ResultPage: React.FC = () => {
     const currentProjectId = useAppStore((state) => state.currentProjectId);
     const [results, setResults] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
+    const [reportModalVisible, setReportModalVisible] = useState(false);
+    const [selectedModelId, setSelectedModelId] = useState<number | null>(null);
+    const [reportData, setReportData] = useState<any>(null);
+    const [reportLoading, setReportLoading] = useState(false);
+    const [genProgress, setGenProgress] = useState(0);
+    const [genStatus, setGenStatus] = useState<string | null>(null);
+    const [genTaskId, setGenTaskId] = useState<number | null>(null);
 
     useEffect(() => {
         if (currentProjectId) {
@@ -44,6 +51,70 @@ const ResultPage: React.FC = () => {
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleViewReport = async (modelId: number) => {
+        setSelectedModelId(modelId);
+        setReportModalVisible(true);
+        setReportData(null);
+        setReportLoading(true);
+        try {
+            const res: any = await api.get(`/projects/${currentProjectId}/models/${modelId}/report`);
+            setReportData(res);
+        } catch (err: any) {
+            if (err.response?.status === 404) {
+                // message.info('报告尚未生成，正在请求生成...');
+                // tryGenerateReport(modelId);
+            } else {
+                message.error('获取报告失败');
+            }
+        } finally {
+            setReportLoading(false);
+        }
+    };
+
+    const tryGenerateReport = async (modelId: number) => {
+        setReportLoading(true);
+        setGenProgress(0);
+        setGenStatus('正在准备任务...');
+        try {
+            const res: any = await api.post(`/projects/${currentProjectId}/models/${modelId}/report`);
+            const taskId = res.task_id;
+            setGenTaskId(taskId);
+
+            // 开始轮询进度
+            const poll = setInterval(async () => {
+                try {
+                    const task: any = await api.get(`/tasks/${taskId}`);
+                    setGenProgress(Math.floor(task.progress));
+                    setGenStatus(task.progress_data?.message || '正在计算中...');
+
+                    if (task.status === 'completed') {
+                        clearInterval(poll);
+                        setGenTaskId(null);
+                        message.success('报告生成成功！');
+                        handleViewReport(modelId); // 自动加载
+                    } else if (task.status === 'failed') {
+                        clearInterval(poll);
+                        setGenTaskId(null);
+                        setReportLoading(false);
+                        message.error(`生成失败: ${task.error_msg}`);
+                    }
+                } catch (e) {
+                    clearInterval(poll);
+                    setGenTaskId(null);
+                    setReportLoading(false);
+                }
+            }, 1000);
+        } catch (err: any) {
+            message.error('提交生成任务失败');
+            setReportLoading(false);
+        }
+    };
+
+    const downloadReport = () => {
+        if (!selectedModelId) return;
+        window.open(`/api/projects/${currentProjectId}/models/${selectedModelId}/report/download`, '_blank');
     };
 
     const getScoreChartOption = (dist: any) => {
@@ -116,6 +187,12 @@ const ResultPage: React.FC = () => {
                                     unCheckedChildren="离线"
                                     onChange={(checked) => toggleModelStatus(result.id, checked)}
                                 />
+                                <Button
+                                    icon={<FileTextOutlined />}
+                                    onClick={() => handleViewReport(result.id)}
+                                >
+                                    查看报表
+                                </Button>
                             </Space>
                         }
                     >
@@ -179,6 +256,138 @@ const ResultPage: React.FC = () => {
                     </Card>
                 );
             })}
+
+            <Modal
+                title={`模型报告详情 #${selectedModelId}`}
+                open={reportModalVisible}
+                onCancel={() => setReportModalVisible(false)}
+                width={1200}
+                footer={[
+                    <Button key="close" onClick={() => setReportModalVisible(false)}>关闭</Button>,
+                    reportData && (
+                        <Button key="download" type="primary" icon={<DownloadOutlined />} onClick={downloadReport}>
+                            导出 Excel
+                        </Button>
+                    ),
+                    !reportData && !reportLoading && (
+                        <Button key="generate" type="primary" onClick={() => tryGenerateReport(selectedModelId!)}>
+                            生成报告
+                        </Button>
+                    )
+                ]}
+            >
+                {reportLoading && !reportData ? (
+                    <div style={{ padding: '60px 0', textAlign: 'center' }}>
+                        {genTaskId ? (
+                            <div style={{ maxWidth: 400, margin: '0 auto' }}>
+                                <Progress percent={genProgress} status="active" />
+                                <div style={{ marginTop: 16, color: '#666' }}>{genStatus}</div>
+                            </div>
+                        ) : (
+                            <div>数据加载中...</div>
+                        )}
+                    </div>
+                ) : reportData ? (
+                    <Tabs defaultActiveKey="summary">
+                        <Tabs.TabPane tab="数据概要" key="summary">
+                            <Table
+                                dataSource={reportData.data_summary}
+                                columns={[
+                                    { title: '数据集', dataIndex: 'dataset', key: 'dataset' },
+                                    { title: '样本量', dataIndex: 'count', key: 'count' },
+                                    { title: '坏账率', dataIndex: 'badrate', key: 'badrate', render: val => (val * 100).toFixed(2) + '%' },
+                                    { title: '最小月份', dataIndex: 'month_min', key: 'month_min' },
+                                    { title: '最大月份', dataIndex: 'month_max', key: 'month_max' },
+                                ]}
+                                pagination={false}
+                                size="small"
+                            />
+                        </Tabs.TabPane>
+                        <Tabs.TabPane tab="模型性能" key="performance">
+                            <Table
+                                dataSource={reportData.performance_eval}
+                                columns={[
+                                    { title: '数据集', dataIndex: 'datasets', key: 'datasets', fixed: 'left' },
+                                    { title: 'AUC', dataIndex: 'auc', key: 'auc', render: val => val?.toFixed(4) },
+                                    { title: 'KS', dataIndex: 'ks', key: 'ks', render: (val) => <strong style={{ color: '#1890ff' }}>{val?.toFixed(4)}</strong> },
+                                    { title: 'Top 1% Lift', dataIndex: 'top_1_lift', key: 'top_1_lift', render: val => val?.toFixed(2) },
+                                    { title: 'Top 2% Lift', dataIndex: 'top_2_lift', key: 'top_2_lift', render: val => val?.toFixed(2) },
+                                    { title: 'Top 3% Lift', dataIndex: 'top_3_lift', key: 'top_3_lift', render: val => val?.toFixed(2) },
+                                    { title: 'Top 5% Lift', dataIndex: 'top_5_lift', key: 'top_5_lift', render: val => val?.toFixed(2) },
+                                    { title: 'Top 10% Lift', dataIndex: 'top_10_lift', key: 'top_10_lift', render: val => val?.toFixed(2) },
+                                    { title: 'Top 20% Lift', dataIndex: 'top_20_lift', key: 'top_20_lift', render: val => val?.toFixed(2) },
+                                ]}
+                                pagination={false}
+                                size="small"
+                                scroll={{ x: 1000 }}
+                            />
+                        </Tabs.TabPane>
+                        <Tabs.TabPane tab="特征重要性" key="importance">
+                            <Table
+                                dataSource={reportData.feature_importance}
+                                columns={[
+                                    { title: '特征名', dataIndex: 'var_name', key: 'var_name', fixed: 'left' },
+                                    { title: '重要性', dataIndex: 'importance', key: 'importance', render: val => val?.toFixed(4) },
+                                    { title: 'Train IV', dataIndex: 'train_iv', key: 'train_iv', render: val => val?.toFixed(4) },
+                                    { title: 'Valid IV', dataIndex: 'valid_iv', key: 'valid_iv', render: val => val?.toFixed(4) },
+                                    { title: 'OOT IV', dataIndex: 'oot_iv', key: 'oot_iv', render: val => val?.toFixed(4) },
+                                    { title: 'Train KS', dataIndex: 'train_ks', key: 'train_ks', render: val => val?.toFixed(4) },
+                                    { title: 'Valid KS', dataIndex: 'valid_ks', key: 'valid_ks', render: val => val?.toFixed(4) },
+                                    { title: 'OOT KS', dataIndex: 'oot_ks', key: 'oot_ks', render: val => val?.toFixed(4) },
+                                ]}
+                                pagination={{ pageSize: 12 }}
+                                size="small"
+                                scroll={{ x: 1000 }}
+                            />
+                        </Tabs.TabPane>
+                        <Tabs.TabPane tab="分箱明细与 PSI" key="psi">
+                            <Row gutter={24}>
+                                <Col span={8}>
+                                    <Card type="inner" title="稳定性指标 (PSI)" size="small">
+                                        <Table
+                                            dataSource={reportData.psi_monthly}
+                                            columns={[
+                                                { title: '月份', dataIndex: 'month', key: 'month' },
+                                                { title: 'PSI', dataIndex: 'psi', key: 'psi', render: (val, record: any) => record.is_baseline ? <Tag>基准</Tag> : val.toFixed(4) }
+                                            ]}
+                                            pagination={false}
+                                            size="small"
+                                        />
+                                        {reportData.psi_train_oot && reportData.psi_train_oot.length > 0 && (
+                                            <div style={{ marginTop: 12, padding: 8, background: '#f5f5f5' }}>
+                                                <strong>总体 PSI (Train vs OOT):</strong> {reportData.psi_train_oot[0].value.toFixed(4)}
+                                            </div>
+                                        )}
+                                    </Card>
+                                </Col>
+                                <Col span={16}>
+                                    <Card type="inner" title="分箱分布明细" size="small">
+                                        <Table
+                                            dataSource={reportData.bin_details}
+                                            columns={[
+                                                { title: '特征名', dataIndex: 'var_name', key: 'var_name', filters: Array.from(new Set(((reportData?.bin_details || []) as any[]).map((x: any) => x.var_name))).map(x => ({ text: x as string, value: x as string })), onFilter: (value, record: any) => record.var_name === value },
+                                                { title: '分箱', dataIndex: 'bin', key: 'bin' },
+                                                { title: '样本占比', dataIndex: 'total_pct', key: 'total_pct', render: val => (val * 100).toFixed(2) + '%' },
+                                                { title: '坏账率', dataIndex: 'bad_rate', key: 'bad_rate', render: val => (val * 100).toFixed(2) + '%' },
+                                                { title: 'WOE', dataIndex: 'woe', key: 'woe', render: val => val?.toFixed(3) },
+                                                { title: 'IV', dataIndex: 'iv', key: 'iv', render: val => val?.toFixed(3) },
+                                                { title: 'Lift', dataIndex: 'lift', key: 'lift', render: val => val?.toFixed(2) },
+                                                { title: '累计 Lift', dataIndex: 'cum_lift', key: 'cum_lift', render: val => val?.toFixed(2) },
+                                            ]}
+                                            pagination={{ pageSize: 10 }}
+                                            size="small"
+                                        />
+                                    </Card>
+                                </Col>
+                            </Row>
+                        </Tabs.TabPane>
+                    </Tabs>
+                ) : (
+                    <div style={{ padding: 50, textAlign: 'center', color: '#999' }}>
+                        该模型版本尚未生成评估报告，请点击下方「生成报告」按钮。
+                    </div>
+                )}
+            </Modal>
         </div>
     );
 };

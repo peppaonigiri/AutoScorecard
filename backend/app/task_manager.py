@@ -36,17 +36,32 @@ def _run_task_wrapper(task_id: int, func: Callable, kwargs: dict) -> Any:
     """在线程中执行任务，自动更新数据库状态"""
     db = SessionLocal()
     try:
-        # 标记为运行中
+        # 标记为运行中，并初始化心跳
+        from sqlalchemy import func as sa_func
         task = db.query(Task).filter(Task.id == task_id).first()
         if task:
             task.status = 'running'
             task.progress = 0.0
+            task.last_heartbeat = sa_func.now()
             db.commit()
 
-        # 传入 progress_callback 以便任务函数汇报进度
         def progress_callback(progress: float, result_data: dict = None):
+            from datetime import datetime, timezone
             t = db.query(Task).filter(Task.id == task_id).first()
             if t:
+                db.refresh(t) # 强制刷入数据库最新的心跳时间
+                if t.last_heartbeat:
+                    # 使用带时区的比较，增强鲁棒性
+                    now_dt = datetime.now(t.last_heartbeat.tzinfo)
+                    diff = (now_dt - t.last_heartbeat).total_seconds()
+                    
+                    if diff > 30: # 30秒阈值
+                        logger.warning(f"任务 {task_id} 心跳超时 ({int(diff)}s)，由于页面可能已刷新或关闭，正在自动释放 CPU 资源...")
+                        t.status = 'failed'
+                        t.error_msg = '执行中页面被刷新或关闭 (心跳超时)'
+                        db.commit()
+                        raise Exception("THREAD_TERMINATED_HEARTBEAT_TIMEOUT")
+
                 t.progress = min(progress, 100.0)
                 if result_data:
                     t.result = result_data

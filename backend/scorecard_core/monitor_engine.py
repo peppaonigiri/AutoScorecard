@@ -7,21 +7,12 @@ import logging
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
-import toad
 
-from scorecard_core.model_trainer import evaluate_model
-from scorecard_core.data_processor import add_weight_column
 from scorecard_core.strategy_engine import run_policy_flow, enrich_df_with_model_scores
 
 logger = logging.getLogger(__name__)
 
-def proba2score(prob, pdo=30, rate=2, base_odds=35, base_score=750):
-    """从概率转换到分数 (参考 ScoreCard/score.py)"""
-    # 避免无效对数
-    prob = np.clip(prob, 1e-6, 1 - 1e-6)
-    factor = pdo / np.log(rate)
-    offset = base_score - factor * np.log(base_odds)
-    return factor * (np.log(1 - prob) - np.log(prob)) + offset
+from scorecard_core.scoring import proba2score
 
 class ScoreCalculator:
     """自动评分寻参器 (移植自 auto_score.py)"""

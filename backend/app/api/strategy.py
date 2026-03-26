@@ -13,13 +13,11 @@ from app.database import get_db
 from app.models import Project, Dataset, Strategy
 from app.schemas import (
     Rule, StrategyAnalyzeRequest, StrategyCreate, StrategyResponse,
-    StrategyReorderRequest, StrategyStatusUpdateRequest
+    StrategyReorderRequest, StrategyStatusUpdateRequest, AutoMiningRequest
 )
+from app.models import ModelResult, Task
 from scorecard_core.data_processor import load_data
 from scorecard_core.strategy_engine import run_strategy_analysis, enrich_df_with_model_scores
-from scorecard_core.monitor_engine import proba2score
-import pickle
-from app.models import ModelResult
 
 _current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _current_dir not in sys.path:
@@ -103,3 +101,30 @@ def delete_strategy(strategy_id: int, db: Session = Depends(get_db)):
     db.delete(strategy)
     db.commit()
     return {'message': '已删除'}
+
+@router.post('/auto-mining')
+async def start_auto_mining(req: AutoMiningRequest, db: Session = Depends(get_db)):
+    """启动自动化规则挖掘任务"""
+    dataset = db.query(Dataset).filter(Dataset.id == req.dataset_id).first()
+    if not dataset:
+        raise HTTPException(status_code=404, detail='数据集不存在')
+        
+    # 1. 记录任务
+    new_task = Task(
+        project_id=dataset.project_id,
+        task_type='strategy_mining',
+        status='pending',
+        progress=0.0,
+        params=req.dict()
+    )
+    db.add(new_task)
+    db.commit()
+    db.refresh(new_task)
+    
+    # 2. 提交异步挖掘任务
+    from scorecard_core.strategy_mining import run_auto_mining_task
+    from app.task_manager import submit_task
+    
+    await submit_task(new_task.id, run_auto_mining_task, **req.dict())
+    
+    return {"task_id": new_task.id}

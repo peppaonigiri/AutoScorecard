@@ -7,12 +7,7 @@ import os
 import pickle
 from typing import List, Dict, Any
 
-def proba2score(prob, pdo=30, rate=2, base_odds=35, base_score=750):
-    """从概率转换到分数"""
-    prob = np.clip(prob, 1e-6, 1 - 1e-6)
-    factor = pdo / np.log(rate)
-    offset = base_score - factor * np.log(base_odds)
-    return factor * (np.log(1 - prob) - np.log(prob)) + offset
+from scorecard_core.scoring import proba2score
 
 def enrich_df_with_model_scores(df: pd.DataFrame, rules: List[Dict], db_session, model_result_model) -> pd.DataFrame:
     """

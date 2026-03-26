@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Form, Input, Select, Button, Space, Table, Typography, Statistic, Row, Col, Divider, message, Popconfirm, Modal, Descriptions, Switch, Badge } from 'antd';
+import { Card, Form, Input, Select, Button, Space, Table, Typography, Statistic, Row, Col, Divider, message, Popconfirm, Modal, Descriptions, Switch, Badge, Alert, InputNumber, Progress } from 'antd';
 import { PlusOutlined, DeleteOutlined, AreaChartOutlined, SaveOutlined, EyeOutlined, HolderOutlined } from '@ant-design/icons';
 import { DndContext, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
@@ -67,6 +67,15 @@ const StrategyPage: React.FC = () => {
     const [isSaveModalVisible, setIsSaveModalVisible] = useState(false);
     const [viewModalVisible, setViewModalVisible] = useState(false);
     const [viewItem, setViewItem] = useState<any>(null);
+    const [explorerVisible, setExplorerVisible] = useState(false);
+    const [explorerLoading, setExplorerLoading] = useState(false);
+    const [binningData, setBinningData] = useState<any[]>([]);
+    const [explorerForm] = Form.useForm();
+    const [miningVisible, setMiningVisible] = useState(false);
+    const [miningLoading, setMiningLoading] = useState(false);
+    const [miningProgress, setMiningProgress] = useState(0);
+    const [recommendations, setRecommendations] = useState<any[]>([]);
+    const [miningForm] = Form.useForm();
 
     useEffect(() => {
         if (currentProjectId) {
@@ -179,6 +188,31 @@ const StrategyPage: React.FC = () => {
         }
     };
 
+    const handleExploreBinning = async (values: any) => {
+        setExplorerLoading(true);
+        try {
+            const res: any = await api.post(`/datasets/${values.dataset_id}/binning-explorer`, values);
+            setBinningData(res || []);
+            message.success('分箱计算完成');
+        } catch (err: any) {
+            message.error(err.response?.data?.detail || '计算失败');
+        } finally {
+            setExplorerLoading(false);
+        }
+    };
+
+    const binningColumns = [
+        { title: '区间', dataIndex: 'bin', key: 'bin' },
+        { title: '样本数', dataIndex: 'total', key: 'total' },
+        { title: '样本占比', dataIndex: 'total_pct', key: 'total_pct', render: (v: number) => (v * 100).toFixed(2) + '%' },
+        { title: '坏人占比', dataIndex: 'bad_pct', key: 'bad_pct', render: (v: number) => (v * 100).toFixed(2) + '%' },
+        { title: '坏账率', dataIndex: 'bad_rate', key: 'bad_rate', render: (v: number) => (v * 100).toFixed(2) + '%' },
+        { title: 'WOE', dataIndex: 'woe', key: 'woe', render: (v: number) => v?.toFixed(4) },
+        { title: 'IV', dataIndex: 'iv', key: 'iv', render: (v: number) => v?.toFixed(4) },
+        { title: 'Lift', dataIndex: 'lift', key: 'lift', render: (v: number) => <Text strong type={v > 1 ? 'danger' : 'success'}>{v?.toFixed(2)}</Text> },
+        { title: '累计 Lift', dataIndex: 'cum_lift', key: 'cum_lift', render: (v: number) => v?.toFixed(2) },
+    ];
+
     const strategyColumns = [
         {
             key: 'sort',
@@ -233,6 +267,88 @@ const StrategyPage: React.FC = () => {
         },
     ];
 
+    const applyAutoRule = (ruleStr: string) => {
+        // 解析简单的 "var > 10" 或 "var <= 5" 格式
+        // 复杂规则 "a > 1 and b <= 2" 目前暂不兼容表单格式
+        const rules = form.getFieldValue('rules') || [];
+        const parts = ruleStr.split(' and ');
+        const newRules = [...rules];
+
+        parts.forEach(p => {
+            const match = p.match(/(.+?)\s*([><=!]+)\s*(.+)/);
+            if (match) {
+                newRules.push({
+                    field: match[1].trim(),
+                    op: match[2].trim(),
+                    val: match[3].trim()
+                });
+            }
+        });
+
+        form.setFieldsValue({ rules: newRules.filter(r => r.field) });
+        message.success('已应用规则到列表');
+    };
+
+    const handleStartMining = async (values: any) => {
+        setMiningLoading(true);
+        setMiningProgress(0);
+        setRecommendations([]);
+        try {
+            const res: any = await api.post('/strategies/auto-mining', {
+                ...values,
+                dataset_id: values.dataset_id
+            });
+            pollMiningTask(res.task_id);
+        } catch (err: any) {
+            message.error('启动挖掘任务失败');
+            setMiningLoading(false);
+        }
+    };
+
+    const pollMiningTask = async (taskId: number) => {
+        const timer = setInterval(async () => {
+            try {
+                const res: any = await api.get(`/tasks/${taskId}`);
+                setMiningProgress(res.progress);
+
+                // 发送心跳信号
+                try {
+                    await api.post(`/tasks/${taskId}/heartbeat`);
+                } catch (hErr) {
+                    console.log('Heartbeat failed', hErr);
+                }
+
+                if (res.status === 'completed') {
+                    clearInterval(timer);
+                    setRecommendations(res.result || []);
+                    setMiningLoading(false);
+                } else if (res.status === 'failed') {
+                    clearInterval(timer);
+                    message.error('挖掘任务失败: ' + res.error_msg);
+                    setMiningLoading(false);
+                }
+            } catch (err) {
+                clearInterval(timer);
+                setMiningLoading(false);
+            }
+        }, 2000);
+    };
+
+    const miningColumns = [
+        { title: '推荐规则', dataIndex: 'rule', key: 'rule', width: 300, render: (t: string) => <Text code>{t}</Text> },
+        { title: '坏账率(Train)', dataIndex: 'train_bad_rate', key: 'train_bad_rate', render: (v: number) => (v * 100).toFixed(2) + '%' },
+        { title: 'Lift(Train)', dataIndex: 'train_lift', key: 'train_lift', render: (v: number) => <Text strong type="danger">{v.toFixed(2)}</Text> },
+        { title: '命中率', dataIndex: 'train_hit_rate', key: 'train_hit_rate', render: (v: number) => (v * 100).toFixed(2) + '%' },
+        { title: 'PSI', dataIndex: 'psi', key: 'psi', render: (v: number) => v.toFixed(4) },
+        {
+            title: '操作',
+            key: 'action',
+            render: (_: any, record: any) => (
+                <Button size="small" type="primary" ghost onClick={() => applyAutoRule(record.rule)}>应用</Button>
+            )
+        }
+    ];
+
     const sensors = useSensors(
         useSensor(PointerSensor, {
             activationConstraint: {
@@ -243,6 +359,14 @@ const StrategyPage: React.FC = () => {
 
     return (
         <div style={{ padding: '24px' }}>
+            <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                <Button icon={<AreaChartOutlined />} onClick={() => setExplorerVisible(true)}>
+                    特征分箱探索
+                </Button>
+                <Button type="primary" icon={<AreaChartOutlined />} onClick={() => setMiningVisible(true)}>
+                    自动化策略挖掘 (Auto Mining)
+                </Button>
+            </div>
             <Row gutter={24}>
                 <Col span={14}>
                     <Card
@@ -511,6 +635,153 @@ const StrategyPage: React.FC = () => {
                             ]}
                         />
                     </div>
+                )}
+            </Modal>
+
+            <Modal
+                title="特征分箱探索器 (Feature Binning Explorer)"
+                open={explorerVisible}
+                onCancel={() => setExplorerVisible(false)}
+                width={1100}
+                footer={null}
+                zIndex={99999}
+                centered
+                getContainer={() => document.body}
+                styles={{ mask: { zIndex: 99999 }, wrapper: { zIndex: 99999 } }}
+            >
+                <Alert message="提示" description="此工具用于快速探索单个变量的分箱分布，辅助制定规则阈值。" type="info" showIcon style={{ marginBottom: 20 }} />
+                <Form
+                    form={explorerForm}
+                    layout="inline"
+                    onFinish={handleExploreBinning}
+                    initialValues={{ method: 'decision_tree', n_bins: 10, min_samples_leaf: 0.05, label_col: 'label' }}
+                    style={{ marginBottom: 24, background: '#fafafa', padding: 16, borderRadius: 8 }}
+                >
+                    <Form.Item name="dataset_id" label="数据集" rules={[{ required: true }]}>
+                        <Select style={{ width: 180 }} placeholder="选择数据集" onChange={(id) => {
+                            const ds = datasets.find(d => d.id === id);
+                            if (ds) setColumns(Object.keys(ds.columns_info));
+                        }}>
+                            {datasets.map(ds => <Option key={ds.id} value={ds.id}>{ds.name}</Option>)}
+                        </Select>
+                    </Form.Item>
+                    <Form.Item name="variable" label="探索变量" rules={[{ required: true }]}>
+                        <Select style={{ width: 180 }} showSearch placeholder="搜索变量">
+                            {columns.map(c => <Option key={c} value={c}>{c}</Option>)}
+                        </Select>
+                    </Form.Item>
+                    <Form.Item name="method" label="分箱方法">
+                        <Select style={{ width: 140 }}>
+                            <Option value="decision_tree">决策树 (最优)</Option>
+                            <Option value="quantile">等频 (Quantile)</Option>
+                            <Option value="chi">卡方 (Chi-square)</Option>
+                        </Select>
+                    </Form.Item>
+                    <Form.Item
+                        noStyle
+                        shouldUpdate={(prev, curr) => prev.method !== curr.method}
+                    >
+                        {({ getFieldValue }) => (
+                            getFieldValue('method') === 'decision_tree' ? (
+                                <Space>
+                                    <Form.Item name="min_samples_leaf" label="最小样本占比">
+                                        <InputNumber step={0.01} min={0.01} max={0.5} style={{ width: 80 }} />
+                                    </Form.Item>
+                                    <Form.Item name="max_leaf_nodes" label="最大箱数">
+                                        <InputNumber min={2} max={20} style={{ width: 60 }} />
+                                    </Form.Item>
+                                </Space>
+                            ) : (
+                                <Form.Item name="n_bins" label="目标箱数">
+                                    <InputNumber min={2} max={20} style={{ width: 60 }} />
+                                </Form.Item>
+                            )
+                        )}
+                    </Form.Item>
+                    <Form.Item>
+                        <Button type="primary" htmlType="submit" loading={explorerLoading}>开始计算</Button>
+                    </Form.Item>
+                </Form>
+
+                <Table
+                    dataSource={binningData}
+                    columns={binningColumns}
+                    rowKey="bin"
+                    loading={explorerLoading}
+                    pagination={false}
+                    size="small"
+                    bordered
+                    summary={(pageData: any) => {
+                        let totalIv = 0;
+                        pageData.forEach((item: any) => { totalIv += (item.iv || 0); });
+                        return (
+                            <Table.Summary.Row>
+                                <Table.Summary.Cell index={0} colSpan={6}><strong>合计 (Sum)</strong></Table.Summary.Cell>
+                                <Table.Summary.Cell index={1}><strong>{totalIv.toFixed(4)}</strong></Table.Summary.Cell>
+                                <Table.Summary.Cell index={2} colSpan={2} />
+                            </Table.Summary.Row>
+                        );
+                    }}
+                />
+            </Modal>
+
+            <Modal
+                title="自动化策略推荐 (Strategy Mining)"
+                open={miningVisible}
+                onCancel={() => setMiningVisible(false)}
+                width={1200}
+                footer={null}
+                zIndex={99999}
+                centered
+                getContainer={() => document.body}
+                styles={{ mask: { zIndex: 99999 }, wrapper: { zIndex: 99999 } }}
+            >
+                <Form
+                    form={miningForm}
+                    layout="inline"
+                    onFinish={handleStartMining}
+                    initialValues={{ tree_type: 'exrf', max_depth: 3, n_estimators: 100, min_samples_leaf: 100 }}
+                    style={{ marginBottom: 24, background: '#fafafa', padding: 16, borderRadius: 8 }}
+                >
+                    <Form.Item name="dataset_id" label="数据集" rules={[{ required: true }]}>
+                        <Select style={{ width: 160 }} placeholder="选择数据集">
+                            {datasets.map(ds => <Option key={ds.id} value={ds.id}>{ds.name}</Option>)}
+                        </Select>
+                    </Form.Item>
+                    <Form.Item name="tree_type" label="挖掘模型">
+                        <Select style={{ width: 120 }}>
+                            <Option value="exrf">极端随机森林</Option>
+                            <Option value="rf">随机森林</Option>
+                            <Option value="dt">单一决策树</Option>
+                        </Select>
+                    </Form.Item>
+                    <Form.Item name="max_depth" label="最大深度">
+                        <InputNumber min={2} max={10} style={{ width: 60 }} />
+                    </Form.Item>
+                    <Form.Item name="min_samples_leaf" label="最小叶子样本">
+                        <InputNumber min={10} max={2000} step={50} style={{ width: 80 }} />
+                    </Form.Item>
+                    <Form.Item>
+                        <Button type="primary" htmlType="submit" loading={miningLoading}>启动挖掘</Button>
+                    </Form.Item>
+                </Form>
+
+                {miningLoading && (
+                    <div style={{ textAlign: 'center', padding: '20px 0' }}>
+                        <Statistic title="挖掘进度" value={miningProgress} precision={1} suffix="%" />
+                        <Progress percent={miningProgress} status="active" strokeColor={{ '0%': '#108ee9', '100%': '#87d068' }} />
+                        <p style={{ marginTop: 10, color: '#999' }}>正在通过机器学习算法挖掘高风险规则组合，请稍候...</p>
+                    </div>
+                )}
+
+                {!miningLoading && recommendations.length > 0 && (
+                    <Table
+                        dataSource={recommendations}
+                        columns={miningColumns}
+                        rowKey="rule"
+                        size="small"
+                        pagination={{ pageSize: 8 }}
+                    />
                 )}
             </Modal>
         </div>

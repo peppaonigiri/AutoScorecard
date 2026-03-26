@@ -154,13 +154,6 @@ def _expanded_strategy(res, strategy_type, threshold=0.03):
             return -(abs(t_auc - o_auc) + abs(t_auc - v_auc))
         return v_auc
 
-    # --- KL 分布 / 散度系列 ---
-    elif s_type == 51:
-        kl_div = res['KL_divergence'].mean() if 'KL_divergence' in res.columns else 0
-        if abs(t_ks - o_ks) < threshold and abs(t_ks - v_ks) < threshold:
-            return kl_div
-        return -(abs(t_ks - o_ks) + abs(t_ks - v_ks))
-
     # 兜底：直接取验证集 KS
     return v_ks
 
@@ -351,9 +344,10 @@ def run_optuna_training(db, task_id, progress_callback,
             'metrics': metrics,
         })
 
-        # 更新最优
-        if value > best_value:
-            best_value = value
+        # 更新最优 (始终选取 OOT KS 最高的版本作为最终输出)
+        curr_oot_ks = metrics.get('oot_ks', 0)
+        if curr_oot_ks > best_value:
+            best_value = curr_oot_ks
             best_model = model
             best_metrics = metrics
             best_params = params
@@ -406,7 +400,7 @@ def run_optuna_training(db, task_id, progress_callback,
                 # 更新 sc 供后续保存
                 sc.update(auto_res['config'])
             else:
-                from scorecard_core.monitor_engine import proba2score
+                from scorecard_core.scoring import proba2score
                 scores = proba2score(probs, 
                                      pdo=sc.get('pdo', 20), 
                                      base_score=sc.get('base_score', 600), 

@@ -9,10 +9,11 @@ import numpy as np # Added for simulate_monitor
 from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from app.database import get_db
 from app.config import MODEL_DIR
-from app.models import Project, Dataset, Task, ModelResult, Deployment, MonitoringLog, Strategy, StrategyMonitoringLog
+from app.models import Project, Dataset, Task, ModelResult, Deployment, MonitoringLog, Strategy, StrategyMonitoringLog, ModelReport
 from app.schemas import (
     ModelingRequest, ModelingResponse, TaskResponse,
     ModelResultResponse, DeploymentRequest, DeploymentResponse,
@@ -96,6 +97,16 @@ def get_task(task_id: int, db: Session = Depends(get_db)):
     if not task:
         raise HTTPException(status_code=404, detail='任务不存在')
     return task
+
+@router.post('/tasks/{task_id}/heartbeat')
+def update_task_heartbeat(task_id: int, db: Session = Depends(get_db)):
+    """更新任务心跳时间"""
+    from app.models import Task
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if task:
+        task.last_heartbeat = func.now()
+        db.commit()
+    return {"status": "ok"}
 
 
 @router.get('/projects/{project_id}/tasks')
@@ -266,3 +277,55 @@ def get_strategy_monitoring_logs(project_id: int, db: Session = Depends(get_db))
         StrategyMonitoringLog.project_id == project_id
     ).order_by(StrategyMonitoringLog.created_at.desc()).limit(20).all()
     return logs
+
+@router.post('/projects/{project_id}/models/{model_id}/report')
+async def generate_model_report_api(project_id: int, model_id: int, db: Session = Depends(get_db)):
+    """启动报告生成任务"""
+    # 创建任务记录
+    task = Task(
+        project_id=project_id,
+        task_type='model_report',
+        status='pending',
+        params={'model_id': model_id}
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+
+    from scorecard_core.report import run_report_task
+    await submit_task(
+        task_id=task.id,
+        func=run_report_task,
+        project_id=project_id,
+        model_result_id=model_id
+    )
+    
+    return {"task_id": task.id, "status": "pending"}
+
+@router.get('/projects/{project_id}/models/{model_id}/report')
+def get_model_report(project_id: int, model_id: int, db: Session = Depends(get_db)):
+    """查看报告详情"""
+    report = db.query(ModelReport).filter(
+        ModelReport.project_id == project_id,
+        ModelReport.model_result_id == model_id
+    ).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="报告尚未生成或模型不存在")
+    return report
+
+@router.get('/projects/{project_id}/models/{model_id}/report/download')
+def download_model_report(project_id: int, model_id: int, db: Session = Depends(get_db)):
+    """导出报告 Excel"""
+    report = db.query(ModelReport).filter(
+        ModelReport.project_id == project_id,
+        ModelReport.model_result_id == model_id
+    ).first()
+    if not report or not report.file_path or not os.path.exists(report.file_path):
+        raise HTTPException(status_code=404, detail="报告文件不存在")
+    
+    from fastapi.responses import FileResponse
+    return FileResponse(
+        report.file_path, 
+        filename=f"model_report_{model_id}.xlsx",
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
