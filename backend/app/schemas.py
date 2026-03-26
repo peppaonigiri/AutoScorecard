@@ -56,12 +56,18 @@ class ProjectResponse(BaseModel):
     name: str
     description: str
     status: str
+    owner_id: Optional[int] = None
+    owner_name: Optional[str] = None
+    is_public: int = 0
     feature_list: List[str] = []
     created_at: datetime
     updated_at: datetime
 
     class Config:
         orm_mode = True
+
+class ProjectVisibilityUpdate(BaseModel):
+    is_public: int
 
 class ProjectListResponse(BaseModel):
     total: int

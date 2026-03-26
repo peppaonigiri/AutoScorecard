@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Table, Card, Typography, Switch, message, Tag, Button, Modal, Input } from 'antd';
+import { Table, Card, Typography, Switch, message, Tag, Button, Modal, Input, Space } from 'antd';
 import api from '../services/api';
 import { useUserStore } from '../stores/userStore';
 import { useNavigate } from 'react-router-dom';
@@ -85,6 +85,22 @@ const AdminUserPage: React.FC = () => {
                     </div>
                     <Button
                         type="link"
+                        onClick={() => openProjectModal(record)}
+                        style={{ padding: 0 }}
+                    >
+                        项目管理
+                    </Button>
+                    <Button
+                        type="link"
+                        danger
+                        onClick={() => handleDeleteUser(record)}
+                        disabled={record.username === 'root'}
+                        style={{ padding: 0 }}
+                    >
+                        删除用户
+                    </Button>
+                    <Button
+                        type="link"
                         danger
                         onClick={() => openResetModal(record)}
                         style={{ padding: 0 }}
@@ -102,10 +118,60 @@ const AdminUserPage: React.FC = () => {
     const [newPassword, setNewPassword] = useState('');
     const [resetting, setResetting] = useState(false);
 
+    // 用户项目管理状态
+    const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
+    const [targetUserProjects, setTargetUserProjects] = useState<any[]>([]);
+    const [projectLoading, setProjectLoading] = useState(false);
+
     const openResetModal = (targetUser: any) => {
         setResetTargetUser(targetUser);
         setNewPassword('');
         setIsModalOpen(true);
+    };
+
+    const openProjectModal = async (targetUser: any) => {
+        setResetTargetUser(targetUser);
+        setIsProjectModalOpen(true);
+        setProjectLoading(true);
+        try {
+            const data: any = await api.get(`/v1/users/${targetUser.id}/projects`);
+            setTargetUserProjects(data);
+        } catch (error) {
+            message.error('获取用户项目失败');
+        } finally {
+            setProjectLoading(false);
+        }
+    };
+
+    const handleToggleProjectVisibility = async (record: any) => {
+        const newStatus = record.is_public === 1 ? 0 : 1;
+        try {
+            await api.put(`/projects/${record.id}/visibility`, { is_public: newStatus });
+            message.success('可见性更新成功');
+            // 刷新当前弹窗的项目列表
+            const data: any = await api.get(`/v1/users/${resetTargetUser.id}/projects`);
+            setTargetUserProjects(data);
+        } catch (error) {
+            message.error('操作失败');
+        }
+    };
+
+    const handleDeleteUser = (userToDelete: any) => {
+        Modal.confirm({
+            title: '确认删除用户？',
+            content: `删除用户 "${userToDelete.username}" 将永久移除其下的所有项目数据和物理文件，操作不可撤销！`,
+            okText: '确认删除',
+            okButtonProps: { danger: true },
+            onOk: async () => {
+                try {
+                    await api.delete(`/v1/users/${userToDelete.id}`);
+                    message.success(`用户 ${userToDelete.username} 已彻底删除`);
+                    fetchUsers();
+                } catch (error: any) {
+                    message.error(error.response?.data?.detail || '删除失败');
+                }
+            }
+        });
     };
 
     const handleResetPassword = async () => {
@@ -153,6 +219,53 @@ const AdminUserPage: React.FC = () => {
                         placeholder="新密码"
                     />
                 </div>
+            </Modal>
+
+            <Modal
+                title={`项目管理: ${resetTargetUser?.username}`}
+                open={isProjectModalOpen}
+                onCancel={() => setIsProjectModalOpen(false)}
+                footer={null}
+                width={800}
+            >
+                <Table
+                    size="small"
+                    rowKey="id"
+                    dataSource={targetUserProjects}
+                    loading={projectLoading}
+                    columns={[
+                        { title: 'ID', dataIndex: 'id', width: 60 },
+                        { title: '名称', dataIndex: 'name' },
+                        {
+                            title: '可见性',
+                            dataIndex: 'is_public',
+                            render: (v) => v === 1 ? <Tag color="green">公开</Tag> : <Tag color="default">私有</Tag>
+                        },
+                        { title: '状态', dataIndex: 'status' },
+                        {
+                            title: '操作',
+                            render: (_, record) => (
+                                <Space>
+                                    <Button size="small" onClick={() => handleToggleProjectVisibility(record)}>
+                                        {record.is_public === 1 ? '设为私有' : '设为公开'}
+                                    </Button>
+                                    <Button size="small" danger onClick={async () => {
+                                        Modal.confirm({
+                                            title: '确认删除',
+                                            onOk: async () => {
+                                                await api.delete(`/projects/${record.id}`);
+                                                message.success('删除成功');
+                                                openProjectModal(resetTargetUser);
+                                            }
+                                        });
+                                    }}>
+                                        删除
+                                    </Button>
+                                </Space>
+                            )
+                        }
+                    ]}
+                />
             </Modal>
         </div>
     );

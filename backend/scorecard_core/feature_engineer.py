@@ -111,8 +111,8 @@ def _simple_iv(df, feature_cols, dep):
 
 
 def calc_missing_rate(df, feature_cols):
-    """计算缺失率"""
-    return (df[feature_cols].isnull().sum() / len(df)).to_dict()
+    """计算缺失率（含 -999）"""
+    return ((df[feature_cols].isnull() | (df[feature_cols] == -999)).sum() / len(df)).to_dict()
 
 
 def calc_std_ratio(df, feature_cols):

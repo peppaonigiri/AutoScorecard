@@ -20,7 +20,7 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # 7 days
 
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/v1/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 

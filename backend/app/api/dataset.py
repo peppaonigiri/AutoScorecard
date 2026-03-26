@@ -45,8 +45,10 @@ def dataset_stats(dataset_id: int, db: Session = Depends(get_db)):
     if not dataset:
         raise HTTPException(status_code=404, detail='数据集不存在')
 
-    # 如果没有缓存，则计算一次并保存
-    if not dataset.stats_cache:
+    # 检查数据库中的统计信息
+    force_recalc = False # 之前由于需要强制更新缺失率逻辑开启了重算，现在改回 False
+    
+    if force_recalc or not dataset.stats_cache:
         try:
             if dataset.file_path.endswith('.parquet'):
                 df = pd.read_parquet(dataset.file_path)
@@ -57,7 +59,9 @@ def dataset_stats(dataset_id: int, db: Session = Depends(get_db)):
             stats, l1_res = calculate_dataset_summary(df)
             dataset.stats_cache = stats
             dataset.l1_results = l1_res
+            db.add(dataset)
             db.commit()
+            db.refresh(dataset)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"计算统计信息失败: {e}")
 

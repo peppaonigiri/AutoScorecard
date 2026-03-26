@@ -7,54 +7,118 @@ import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any, Optional
+from datetime import datetime
 
 from app.database import get_db
 from app.config import UPLOAD_DIR
-from app.models import Project, Dataset, ModelResult, Deployment
+from app.models import Project, Dataset, ModelResult, Deployment, User
 from app.schemas import (
     ProjectCreate, ProjectResponse, ProjectListResponse, DatasetResponse,
-    DeploymentRequest, DeploymentResponse
+    DeploymentRequest, DeploymentResponse, ProjectVisibilityUpdate
 )
+from app.api.auth import get_current_user
 
 router = APIRouter(prefix='/api/projects', tags=['项目管理'])
 
+def check_project_access(project_id: int, db: Session, user: User, need_write: bool = False):
+    """通用项目权限检查 (包含对 Project 表的查询)"""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail='项目不存在')
+    
+    # 获取公开状态/所有者
+    is_public = project.is_public == 1
+    is_owner = project.owner_id == user.id
+    is_admin = user.is_admin == 1
+
+    if need_write:
+        # 写操作：仅限所有者或管理员
+        if not is_owner and not is_admin:
+            raise HTTPException(status_code=403, detail='无权修改该项目')
+    else:
+        # 读操作：公开项目全员可读，私有项目仅限所有者和管理员
+        if not is_public and not is_owner and not is_admin:
+            raise HTTPException(status_code=403, detail='无权访问该私有项目')
+    return project
+
 
 @router.post('', response_model=ProjectResponse)
-def create_project(req: ProjectCreate, db: Session = Depends(get_db)):
-    project = Project(name=req.name, description=req.description or '')
+def create_project(req: ProjectCreate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    project = Project(
+        name=req.name, 
+        description=req.description or '',
+        owner_id=current_user.id
+    )
     db.add(project)
     db.commit()
     db.refresh(project)
+    project.owner_name = current_user.username
     return project
 
 
 @router.get('', response_model=ProjectListResponse)
-def list_projects(db: Session = Depends(get_db)):
-    projects = db.query(Project).order_by(Project.created_at.desc()).all()
+def list_projects(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    query = db.query(Project)
+    
+    # 如果不是管理员，只显示自己拥有的或公开的项目
+    if current_user.is_admin != 1:
+        from sqlalchemy import or_
+        query = query.filter(or_(Project.owner_id == current_user.id, Project.is_public == 1))
+        
+    projects = query.order_by(Project.created_at.desc()).all()
+    
+    # 手动附加 owner_name 用于展示
+    for p in projects:
+        p.owner_name = p.owner.username if p.owner else "系统"
+        
     return ProjectListResponse(total=len(projects), items=projects)
 
 
 @router.get('/{project_id}', response_model=ProjectResponse)
-def get_project(project_id: int, db: Session = Depends(get_db)):
+def get_project(project_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail='项目不存在')
+        
+    # 权限检查：私有项目且不是所有者且不是管理员，禁止访问
+    if not project.is_public and project.owner_id != current_user.id and not current_user.is_admin:
+        raise HTTPException(status_code=403, detail='无权访问该私有项目')
+        
+    project.owner_name = project.owner.username if project.owner else "系统"
+    return project
+
+
+@router.put('/{project_id}/visibility', response_model=ProjectResponse)
+def update_visibility(project_id: int, req: ProjectVisibilityUpdate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    """修改项目公开状态"""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail='项目不存在')
+        
+    # 只有所有者或管理员可以修改可见性
+    if project.owner_id != current_user.id and not current_user.is_admin:
+        raise HTTPException(status_code=403, detail='无权修改该项目')
+        
+    project.is_public = req.is_public
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+    project.owner_name = project.owner.username if project.owner else "系统"
     return project
 
 
 @router.get('/{project_id}/datasets', response_model=List[DatasetResponse])
-def list_datasets(project_id: int, db: Session = Depends(get_db)):
+def list_datasets(project_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     """获取项目下的所有数据集"""
+    check_project_access(project_id, db, current_user, need_write=False)
     datasets = db.query(Dataset).filter(Dataset.project_id == project_id).all()
     return datasets
 
 
 @router.post('/{project_id}/datasets', response_model=DatasetResponse)
-def upload_dataset(project_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
-    # 检查项目
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail='项目不存在')
+def upload_dataset(project_id: int, file: UploadFile = File(...), db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    # 检查项目权限
+    project = check_project_access(project_id, db, current_user, need_write=True)
 
     # 保存文件
     project_dir = os.path.join(UPLOAD_DIR, str(project_id))
@@ -95,17 +159,24 @@ def upload_dataset(project_id: int, file: UploadFile = File(...), db: Session = 
 
 
 @router.delete('/{project_id}')
-def delete_project(project_id: int, db: Session = Depends(get_db)):
+def delete_project(project_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail='项目不存在')
+        
+    # 只有所有者或管理员可以删除
+    if project.owner_id != current_user.id and not current_user.is_admin:
+        raise HTTPException(status_code=403, detail='无权删除该项目')
+        
     db.delete(project)
     db.commit()
     return {'message': '已删除'}
 
 @router.post('/{project_id}/deploy')
-def deploy_model(project_id: int, req: DeploymentRequest, db: Session = Depends(get_db)):
-    """上线模型（移除强类型校验以排查序列化故障）"""
+def deploy_model(project_id: int, req: DeploymentRequest, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    # 权限检查
+    check_project_access(project_id, db, current_user, need_write=True)
+    """上线模型"""
     print(f"DEBUG: 接收到上线请求 - 项目 ID: {project_id}, 模型 ID: {req.model_result_id}")
     try:
         result = db.query(ModelResult).filter(
@@ -154,7 +225,9 @@ def deploy_model(project_id: int, req: DeploymentRequest, db: Session = Depends(
         logging.exception(f"后端执行上线逻辑崩溃: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 @router.get('/{project_id}/deployments')
-def list_deployments(project_id: int, db: Session = Depends(get_db)):
+def list_deployments(project_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    # 权限检查
+    check_project_access(project_id, db, current_user, need_write=False)
     """获取项目下的部署列表"""
     from sqlalchemy import case
     deployments = db.query(Deployment).filter(Deployment.project_id == project_id)\

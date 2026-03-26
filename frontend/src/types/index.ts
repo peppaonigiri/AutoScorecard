@@ -3,6 +3,9 @@ export interface Project {
     name: string;
     description?: string;
     status: string;
+    owner_id?: number;
+    owner_name?: string;
+    is_public: number;
     created_at: string;
     updated_at: string;
 }

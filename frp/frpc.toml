@@ -1,0 +1,21 @@
+# 基础配置：连接到你的服务器
+serverAddr = "124.223.84.98"
+serverPort = 7100
+auth.method = "token"
+auth.token = "12345dfFDFERDFDF678"
+
+# 透传本地的 5173 端口 (假设是 Vite/Vue 项目)
+[[proxies]]
+name = "web-5173"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 5173
+remotePort = 5173  # 外部访问端口
+
+# 透传本地的 8081 端口 (假设是后端 API 或服务)
+[[proxies]]
+name = "api-8081"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 8081
+remotePort = 8081  # 外部访问端口

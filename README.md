@@ -49,5 +49,76 @@
 
 ---
 
+## 🏗️ 4. 系统交互流程图 (System Architecture)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant User as 用户 (Browser)
+    participant Front as 前端 (React + AntD)
+    participant API as 后端 (FastAPI)
+    participant Task as 异步引擎 (TaskManager)
+    participant Core as 算法库 (scorecard_core)
+    participant DB as 数据库 (PostgreSQL)
+    participant Disk as 物理存储 (Storage)
+
+    Note over User, Disk: 场景 1: 登录与权限控制 (Auth)
+    User->>Front: 输入账号/密码
+    Front->>API: POST /auth/login
+    API->>DB: 查询用户信息
+    DB-->>API: 返回 HashedPassword
+    API->>API: Bcrypt 验证并签发 JWT
+    API-->>Front: 返回 Token
+
+    Note over User, Disk: 场景 2: 数据资产管理 (Dataset)
+    User->>Front: 上传数据文件 (CSV)
+    Front->>API: POST /datasets/upload (带 Token)
+    API->>Disk: 写入 /storage/uploads/
+    API->>Core: 计算基础统计 & L1 初筛 (缺失率/方差)
+    API->>DB: 保存数据元信息与初筛结果
+    API-->>Front: 列表展示数据集详情
+
+    Note over User, Disk: 场景 3: 自动化建模流程 (Modeling)
+    User->>Front: 设置参数并启动建模
+    Front->>API: POST /modeling/submit
+    API->>Task: 注册异步任务 (Pending)
+    API-->>Front: 返回 task_id
+    Front->>API: 轮询查询任务进度
+    
+    activate Task
+    Task->>Core: 调用 run_optuna_training
+    Core->>Core: 数据拆分 -> Optuna 调参 -> 评分卡转换
+    Core->>Disk: 保存 model.pkl
+    Task->>DB: 写入 ModelResult (KS/AUC/特征重要性)
+    Task->>DB: 更新 Task 状态 (Completed)
+    deactivate Task
+
+    Note over User, Disk: 场景 4: 结果分析与可视化 (Result)
+    User->>Front: 查看模型报告
+    Front->>API: GET /model_results/{id}
+    API->>DB: 读取指标与分箱分布
+    API-->>Front: 渲染 ECharts 可视化图表 (KS/AUC/Score Dist)
+
+    Note over User, Disk: 场景 5: 风控策略编排与历史回测 (Strategy & Backtest)
+    User->>Front: 1. 可视化编排规则 (如: score < 550 OR multi_loan > 5)
+    Front->>API: 2. POST /strategies/save
+    API->>DB: 3. 存储规则 JSONB 及其优先级
+    
+    User->>Front: 4. 选择历史数据集进行“回测分析” (Backtest)
+    Front->>API: 5. POST /strategies/backtest {dataset_id, strategy_id}
+    API->>Disk: 6. 加载含有真实 Label 的历史样本
+    API->>Core: 7. 执行向量化规则匹配 (Vectorized Match)
+    Core->>Core: 8. 计算业务指标 (误伤率/捕获率/坏账抵御能力)
+    API->>DB: 9. 固化回测报告快照
+    API-->>Front: 10. 给回测结果看板, 展示“通过率 vs 坏账率”权衡曲线
+
+    Note over User, Disk: 场景 6: 联机模拟监测与稳定性预警 (Monitor)
+    User->>Front: 点击“联合模拟监测” (部署模型 + 激活策略)
+    Front->>API: POST /monitor/simulate_all
+    API->>Core: 1. 基于 Bootstrap Drift 生成模拟进件
+    API->>Core: 2. 预测概率 -> 映射评分 -> 策略流实时拦截
+    API->>DB: 3. 记录全量监测报告 (PSI / 拦截强度分布)
+    API-->>Front: 4. 多维指标看板, 当 PSI > 0.1 时触发预警状态
+```
 
 祝您建模体验愉快！如果有任何问题，请随时在文档反馈。

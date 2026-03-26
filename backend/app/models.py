@@ -18,6 +18,7 @@ class User(Base):
     is_admin = Column(Integer, default=0)  # 0: 普通用户, 1: 管理员 (SQLite boolean workaround)
     is_active = Column(Integer, default=1) # 0: 停用, 1: 启用
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    projects = relationship('Project', back_populates='owner', cascade='all, delete-orphan')
 
 
 class Project(Base):
@@ -31,7 +32,12 @@ class Project(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
+    # 权限与可见性 (增加级联配置提示)
+    owner_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=True) 
+    is_public = Column(Integer, default=0) # 0: 私有, 1: 公开
+
     # 关联
+    owner = relationship('User', back_populates='projects', foreign_keys=[owner_id])
     datasets = relationship('Dataset', back_populates='project', cascade='all, delete-orphan')
     tasks = relationship('Task', back_populates='project', cascade='all, delete-orphan')
     model_results = relationship('ModelResult', back_populates='project', cascade='all, delete-orphan')

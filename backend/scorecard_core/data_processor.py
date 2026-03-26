@@ -18,12 +18,14 @@ def load_data(file_path):
 
 def get_basic_stats(df, dep='label'):
     """获取数据基础统计信息"""
+    # 计算缺失率（将 -999 视为缺失）
+    missing_counts = (df.isnull() | (df == -999)).sum()
     stats = {
         'n_rows': len(df),
         'n_cols': len(df.columns),
         'columns': list(df.columns),
         'dtypes': {col: str(dtype) for col, dtype in df.dtypes.items()},
-        'missing_rates': (df.isnull().sum() / len(df)).to_dict(),
+        'missing_rates': (missing_counts / len(df)).to_dict(),
     }
 
     # 数值列统计
@@ -157,8 +159,8 @@ def screen_features_basic(df, feature_cols, single_value_limit=0.95, null_limit=
             kept.append(col)
             continue
 
-        # 1. 缺失率
-        null_rate = df[col].isnull().mean()
+        # 1. 缺失率 (含 -999)
+        null_rate = (df[col].isnull() | (df[col] == -999)).mean()
         if null_rate >= null_limit:
             removed['missing'].append(col)
             continue
@@ -188,12 +190,14 @@ def calculate_dataset_summary(df, dep='label', thresholds=None):
         thresholds = {'freq': 0.95, 'missing': 0.95}
 
     total_rows = len(df)
+    # 计算缺失率（将 -999 视为缺失）
+    missing_counts = (df.isnull() | (df == -999)).sum()
     stats = {
         'n_rows': total_rows,
         'n_cols': len(df.columns),
         'columns': list(df.columns),
         'dtypes': {col: str(dtype) for col, dtype in df.dtypes.items()},
-        'missing_rates': (df.isnull().sum() / total_rows).to_dict(),
+        'missing_rates': (missing_counts / total_rows).to_dict(),
     }
 
     # 计算分位数和数值统计
