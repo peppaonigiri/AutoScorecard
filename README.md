@@ -65,54 +65,243 @@
 
 ---
 
-## 🏗️ 交互链路结构 (System Architecture)
+## 🏗️ 1. 层次化系统架构图 (System Architecture)
+
+该图展示了前后端物理隔离下的功能划分，特别强调了 `TaskManager` 的后台防护机制，以及核心算法引擎（`scorecard_core`）承担的职责流转。
+
+```mermaid
+graph TB
+    subgraph Frontend [前端 UI 层 (React + AntD + Vite)]
+        UI_Auth[权限与工作台模块]
+        UI_Data[数据资产与初筛可视化]
+        UI_Feat[特征分箱与PSI/IV大盘]
+        UI_Model[模型调优设置与进度监控]
+        UI_Report[模型报告下载与可视化评估]
+        UI_Strategy[策略编排挖掘与回测推演]
+        UI_Monitor[上线部署与分布偏移监测]
+    end
+
+    subgraph Backend_API [后端网关暴露层 (FastAPI)]
+        API_Auth([Auth.py])
+        API_Project([Project.py])
+        API_Dataset([Dataset.py])
+        API_Feature([Feature.py])
+        API_Modeling([Modeling.py])
+        API_Strategy([Strategy.py])
+    end
+
+    subgraph Backend_Task [异步调度与保障层 (TaskManager)]
+        Task_Queue[SQLite/PG 状态调度]
+        Heartbeat[任务心跳保护与进程树销毁]
+    end
+
+    subgraph Backend_Core [核心算法引擎 (scorecard_core)]
+        Core_Data[[data_processor: 异常值与同值率初筛]]
+        Core_Feat[[feature_engineer: WOE分箱与PSI剔除]]
+        Core_Train[[model_trainer: Optuna寻参转评分卡]]
+        Core_Report[[report: 评估曲线与报告生成]]
+        Core_Mining[[strategy_mining: 决策树基发掘]]
+        Core_Engine[[strategy_engine: 规则推演拦截库]]
+        Core_Monitor[[monitor_engine: 打分分布偏移估算]]
+    end
+
+    subgraph Database [持久层 (PostgreSQL / SQLite)]
+        DB_Users[(Users)]
+        DB_Projects[(Projects/Datasets)]
+        DB_Tasks[(Tasks / ModelResults)]
+        DB_Deploy[(Deployments/Logs)]
+        DB_Strategy[(Strategies)]
+    end
+
+    subgraph Storage [持久文件 (Storage)]
+        S_CSV(样本 CSV)
+        S_BIN(Pickle 模型)
+        S_EXCEL(离线报告图表)
+    end
+
+    Frontend == 携带 JWT ===> Backend_API
+    Backend_API --> Task_Queue
+    Backend_API --> Core_Data
+    Backend_API --> Core_Feat
+    API_Strategy --> Core_Mining
+    API_Strategy --> Core_Engine
+    Task_Queue -. 唤起子进程 .-> Core_Train
+    Heartbeat -. 中断拦截 .-> Core_Train
+    Core_Train --> Core_Report
+    Backend_API <--> Database
+    Core_Data --> S_CSV
+    Core_Train --> S_BIN
+    Core_Report --> S_EXCEL
+    Core_Data ..> DB_Projects
+    Core_Train ..> DB_Tasks
+    Core_Monitor ..> DB_Deploy
+    Core_Engine ..> DB_Strategy
+```
+
+---
+
+## 🔄 2. 核心业务流程与时序交互图 (User Flow & Interactions)
+
+该图重点演示了“特征挖掘 - 调参算力防线 - 策略验证”的核心生命周期进度，包含后台心跳自毁防联断机制：
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant User as 用户 (Browser)
-    participant Front as 前端 (React + AntD)
-    participant API as 后端 (FastAPI)
-    participant Task as 异步引擎 (TaskManager)
-    participant Core as 算法库 (scorecard_core)
-    participant DB as 数据库 (Postgres)
+    actor U as 风控建模人员 (User)
+    participant F as 前端界面 (React)
+    participant B as 后端网关 (FastAPI)
+    participant C as 核心算法 (scorecard_core)
+    participant TM as 任务管理引擎 (TaskManager)
+    participant DB as 数据库 (PostgreSQL)
 
-    Note over User, DB: 🔐 1. 登录与身份验证
-    User->>Front: 输入账号/密码凭证
-    Front->>API: POST /auth/login
-    API->>DB: 校验 HashedPassword
-    API-->>Front: 返回 JWT Token
-    
-    Note over User, DB: 📋 2. 数据资产注入 (L1 初筛)
-    User->>Front: 上传 CSV 集
-    Front->>API: POST /datasets/upload (带 Token)
-    API->>Core: 计算基础特征分布统计 & 统计学剔除
-    API->>DB: 存储数据元信息、PSI 与筛选快照
-    
-    Note over User, DB: 🧠 3. 自动化建模调优 (Optuna + Heartbeat)
-    User->>Front: 设定建模/报告参数并行任务
-    Front->>API: POST /modeling/submit
-    API->>Task: 注册异步任务 (Pending)
-    loop 任务存活期 (心跳自动清理检测)
-        Front->>API: 每 2s 轮询进度并发送 /heartbeat
-        API->>DB: 更新该任务对应的 last_heartbeat
-        Task->>Task: 检测: now - last_heartbeat > timeout ? (终端并杀掉进程)
+    %% 阶段1
+    rect rgb(230, 245, 255)
+    Note right of U: 一、数据资产接入与L1初步处理
+    U->>F: 上传CSV进件数据集文件（对照文档等）
+    F->>B: POST /api/datasets/upload (多模表单流)
+    B->>C: data_processor.process_l1()
+    C-->>B: 解析Type、同值率和缺失筛选
+    B->>DB: 写入 Datasets 的 meta信息与统计缓存
+    B-->>F: 返回上传进度、表头映射与初筛报告
     end
-    Task->>Core: 调用 run_optuna_training (寻参 -> 转换评分卡)
-    Task->>DB: 写入最终 ModelResult (KS/AUC/特征重要性)
-    Task->>DB: 更新 Task 状态 (Completed)
+
+    %% 阶段2
+    rect rgb(240, 255, 240)
+    Note right of U: 二、特征工程与L2深度筛选 (人工+自动)
+    U->>F: 圈定目标集与OOT集，设置 IV 与 PSI 剔除阈值
+    F->>B: POST /api/feature/select
+    B->>C: feature_engineer.binning_and_filter()
+    C-->>B: 执行WOE分箱映射、相关性矩阵计算与剔除
+    B->>DB: 更新 Project.feature_list 固定入模特征阵列
+    B-->>F: 回传特征看板进行预览评估
+    end
+
+    %% 阶段3
+    rect rgb(255, 245, 230)
+    Note right of U: 三、后台并发建模与【心跳保活销毁机制】
+    U->>F: 触发 Optuna 模型训练(设最大尝试与PDO)
+    F->>B: POST /api/modeling/submit_optuna
+    B->>DB: 新增 Tasks 记录 (Status=pending)
+    B->>TM: 发起异步进程分离 task_manager.run_task(task_id)
+    TM->>C: Python 子进程拉起 model_trainer.run_optuna_training()
     
-    Note over User, DB: 📊 4. 离线报告与监控预警 (Monitor)
-    User->>Front: 在看板查看模拟监测报告或点击下载 Excel
-    Front->>API: GET /models/{id}/report
-    API->>DB: 读取指标快照、PSI 线与分箱结果
-    API-->>Front: ECharts 渲染 (KS/AUC/Score Distribution)
+    par [前端心跳轮询保活]
+        loop 2s 轮询监控
+            F->>B: POST /api/modeling/heartbeat
+            B->>DB: 刷新 Task.last_heartbeat (延续寿命)
+            B-->>F: 返回当前进度 progress%
+        end
+    and [TaskManager 猎杀者判定]
+        loop 10s 死循环检测
+            TM->>DB: 检查超时情况 (now() - last_heartbeat) 
+            opt 发现断联断网 (差值 > 60秒 取消任务)
+                TM-->>TM: 触发强杀机制 os.kill() 或 SIGTERM
+                TM->>DB: 更新 Task 状态为 failed (超时截杀)
+            end
+        end
+    end
     
-    Note over User, DB: 🎯 5. 策略编排挖掘与回测模拟
-    User->>Front: 选择决策树策略并执行历史数据模拟演习
-    Front->>API: POST /strategies/backtest
-    API->>Core: 执行向量化规则匹配 (Vectorized Logic Match)
-    API->>DB: 生成业务成果报告 (坏账拦截对比看板)
+    C-->>TM: 训练完毕导出参数，并将逻辑回归折现成标准风控制表
+    TM->>DB: 特征贡献/AUC写入 ModelResults 与 score_distribution
+    TM->>DB: 更新 Tasks 状态为 completed
+    end
+
+    %% 阶段4
+    rect rgb(245, 235, 255)
+    Note right of U: 四、指标报告生成与策略发掘模拟
+    U->>F: 审查在线曲线或提出验证规则
+    F->>B: GET /api/modeling/{id}/report
+    B->>C: report.py 生成图表序列及本地化 Excel 写入
+    B-->>F: 在线呈现 KS/AUC / Lift 数据视面
+    
+    U->>F: "设定实验规则" 用于进件拦截测算
+    F->>B: POST /api/strategy/backtest
+    B->>C: strategy_engine.vectorized_match() (底层矢量急速排查)
+    C-->>B: 获取现有客群的历史审批率(Approval Rate)与业务提升度(Lift)
+    B->>DB: 回放指标写入 Strategy Monitoring Log
+    B-->>F: 渲染展示通过率、坏账率分布
+    end
+```
+
+---
+
+## 🗄️ 3. 稳态数据库实体关系图 (ER Diagram)
+
+此图体现了各个组件产生的持久化资产结构体系与级联销毁关系网：
+
+```mermaid
+erDiagram
+    Users {
+        int id PK
+        string username "账户名称"
+        string hashed_password "令牌"
+        int is_admin "管理级标签"
+    }
+
+    Projects {
+        int id PK
+        int owner_id FK
+        string name "空间节点名"
+        string status "执行位态"
+        json feature_list "有效特征保留底表"
+        json split_config "OOT切分策略配置"
+    }
+
+    Datasets {
+        int id PK
+        int project_id FK
+        string file_path "物理存储路径"
+        json l1_results "异常及同值过滤字典"
+        json stats_cache "描述性统计总览"
+    }
+
+    Tasks {
+        int id PK
+        int project_id FK
+        string task_type "特征过滤与Optuna特征"
+        string status "存活周期(pending/running)"
+        datetime last_heartbeat "心跳信号保活戳"
+    }
+
+    ModelResults {
+        int id PK
+        int project_id FK
+        int task_id FK "绑定的异步产出流"
+        string model_path "Pickle文件持久化指针"
+        json params "模型反解超参最优阵列"
+        json metrics "入参及AUC评估分数"
+        json score_distribution "风控直方分布图"
+    }
+
+    Strategy {
+        int id PK
+        int project_id FK
+        string rule_type "通过阈/反欺诈拦截阈"
+        json rules "向量推理条件规则集"
+        json metrics "拦截率及通过成效指标"
+    }
+
+    StrategyMonitoringLog {
+        int id PK
+        int project_id FK
+        string batch_name "监控时段次"
+        json rule_stats "触发热点详情"
+    }
+
+    ModelReports {
+        int id PK
+        int model_result_id FK
+        json performance_eval "报告前端切片映射"
+    }
+
+    Users ||--o{ Projects : "所有者(级联删除)"
+    Projects ||--o{ Datasets : "输入资源"
+    Projects ||--o{ Tasks : "下推训练流"
+    Projects ||--o{ ModelResults : "容纳调优模型"
+    Projects ||--o{ Strategy : "配置阻断器"
+    Projects ||--o{ StrategyMonitoringLog: "沉淀监控批次"
+    Tasks ||--o| ModelResults : "孵化"
+    ModelResults ||--o| ModelReports : "可视化展现"
 ```
 
 ---
