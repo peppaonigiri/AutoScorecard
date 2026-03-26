@@ -89,6 +89,13 @@ const ResultPage: React.FC = () => {
                     setGenProgress(Math.floor(task.progress));
                     setGenStatus(task.progress_data?.message || '正在计算中...');
 
+                    // 发送心跳，维持后台任务
+                    try {
+                        await api.post(`/tasks/${taskId}/heartbeat`);
+                    } catch (hErr) {
+                        console.warn('Heartbeat failed', hErr);
+                    }
+
                     if (task.status === 'completed') {
                         clearInterval(poll);
                         setGenTaskId(null);

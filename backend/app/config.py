@@ -32,6 +32,8 @@ else:
 SERVER_HOST = _cfg['server']['host']
 SERVER_PORT = _cfg['server']['port']
 SERVER_DEBUG = _cfg['server']['debug']
+HEARTBEAT_ENABLED = _cfg['server'].get('heartbeat_enabled', True)
+HEARTBEAT_TIMEOUT = _cfg['server'].get('heartbeat_timeout', 60)
 
 # 存储配置
 UPLOAD_DIR = os.path.join(BASE_DIR, _cfg['storage']['upload_dir'])

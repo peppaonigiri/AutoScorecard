@@ -47,15 +47,16 @@ def _run_task_wrapper(task_id: int, func: Callable, kwargs: dict) -> Any:
 
         def progress_callback(progress: float, result_data: dict = None):
             from datetime import datetime, timezone
+            from app.config import HEARTBEAT_ENABLED, HEARTBEAT_TIMEOUT
             t = db.query(Task).filter(Task.id == task_id).first()
             if t:
                 db.refresh(t) # 强制刷入数据库最新的心跳时间
-                if t.last_heartbeat:
+                if HEARTBEAT_ENABLED and t.last_heartbeat:
                     # 使用带时区的比较，增强鲁棒性
                     now_dt = datetime.now(t.last_heartbeat.tzinfo)
                     diff = (now_dt - t.last_heartbeat).total_seconds()
                     
-                    if diff > 30: # 30秒阈值
+                    if diff > HEARTBEAT_TIMEOUT: # 使用配置的超时时间
                         logger.warning(f"任务 {task_id} 心跳超时 ({int(diff)}s)，由于页面可能已刷新或关闭，正在自动释放 CPU 资源...")
                         t.status = 'failed'
                         t.error_msg = '执行中页面被刷新或关闭 (心跳超时)'

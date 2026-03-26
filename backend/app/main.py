@@ -14,6 +14,10 @@ _backend_root = os.path.dirname(_current_dir)
 if _backend_root not in sys.path:
     sys.path.insert(0, _backend_root)
 
+# 【重要修复】强制使用非交互式后端，防止后台线程绘图时触发 tkinter 崩溃
+import matplotlib
+matplotlib.use('Agg')
+
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse

@@ -13,6 +13,8 @@ server:
   host: "0.0.0.0"  # 允许局域网访问
   port: 8081
   debug: true
+  heartbeat_enabled: false
+  heartbeat_timeout: 60
 
 storage:
   upload_dir: ./storage/uploads
