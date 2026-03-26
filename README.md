@@ -6,26 +6,31 @@
 
 ## ✨ 核心亮点 (Key Highlights)
 
--   **一致性评分引擎**：系统内置统一的 Proba-to-Score 映射模型，确保从训练、模拟到线上监测的各环境下，分值计算逻辑完全对齐，消除分值偏差风险。
--   **系统级资源安全**：内置**任务心跳自毁机制**。当浏览器刷新或断开连接时，后台高消耗任务（如寻参调优、报表生成）会在 60s 内自动终止并释放 CPU 资源，有效防止服务器空转。
--   **无头绘图优化**：采用 Matplotlib `Agg` 非交互式后端，支持在无桌面环境服务器中稳定输出 Excel 报表与可视化图表，极大提升了生产环境下的绘图可靠性。
+- **一致性评分引擎**：系统内置统一的 Proba-to-Score 映射模型，确保从训练、模拟到线上监测的各环境下，分值计算逻辑完全对齐，消除分值偏差风险。
+- **系统级资源安全**：内置**任务心跳自毁机制**。当浏览器刷新或断开连接时，后台高消耗任务（如寻参调优、报表生成）会在 60s 内自动终止并释放 CPU 资源，有效防止服务器空转。
+- **无头绘图优化**：采用 Matplotlib `Agg` 非交互式后端，支持在无桌面环境服务器中稳定输出 Excel 报表与可视化图表，极大提升了生产环境下的绘图可靠性。
 
 ---
 
 ## 🛠️ 环境准备与安装 (Setup)
 
 ### 1. 后端环境 (Backend Setup)
--   **Python 推荐**: Python 3.8 或更高版本（推荐使用 Conda 虚拟环境 `p_3_8_fb`）。
--   **安装依赖**:
+
+- **Python 推荐**: Python 3.8 或更高版本（推荐使用 Conda 虚拟环境 `p_3_8_fb`）。
+- **安装依赖**:
+
     ```bash
     cd backend
     pip install -r requirements.txt
     ```
--   **初始化**: 根目录下的 `config.yaml` 存储核心配置（如数据库、心跳开关）。首次运行前请执行 `init_scorecard.sql` 初始化表结构。
+
+- **初始化**: 根目录下的 `config.yaml` 存储核心配置（如数据库、心跳开关）。首次运行前请执行 `init_scorecard.sql` 初始化表结构。
 
 ### 2. 前端环境 (Frontend Setup)
--   **Node.js**: 建议使用 LTR 版本（16.x 或更高）。
--   **安装依赖**:
+
+- **Node.js**: 建议使用 LTR 版本（16.x 或更高）。
+- **安装依赖**:
+
     ```bash
     cd frontend
     npm install
@@ -35,22 +40,22 @@
 
 ## 🚀 启动与运行 (Running)
 
--   **一键联测**: 双击点击根目录下的 `start_project.bat` 脚本（Windows 环境专用）。
--   **手动分块启动**:
-    -   **API 后端**: `cd backend && python app/main.py` (默认端口 8081)。
-    -   **UI 前端**: `cd frontend && npm run dev` (Vite 调试模式)。
+- **一键联测**: 双击点击根目录下的 `start_project.bat` 脚本（Windows 环境专用）。
+- **手动分块启动**:
+  - **API 后端**: `cd backend && python app/main.py` (默认端口 8081)。
+  - **UI 前端**: `cd frontend && npm run dev` (Vite 调试模式)。
 
 ---
 
 ## 📖 核心业务指南 (Case Flow)
 
-1.  **数据资产上传**：上传 CSV 数据集。系统自动执行数据清洗与 **L1 基础分析**（去除缺失率/方差不足特征）。
-2.  **多集变量分析**：灵活定义划分比例，对比训练集/验证集与测试集 (OOT) 的 IV、PSI 稳定性指标。
-3.  **变量筛选 L2**：基于 IV、相关性、PSI 阈值执行自动变量剔除，锁定入模最佳特征池。
-4.  **智能建模调优**：集成 **Optuna** 深度寻优算法，基于贝叶斯策略自动调参，并一键完成评分卡转换（支持 PDO/基准分调整）。
-5.  **专业模型报告**：后台渲染 KS/AUC 曲线图与分箱分布图，支持导出内嵌特征分析详情的 Excel 企业级报告。
-6.  **策略挖掘回测**：基于决策树自动挖掘拦截规则，通过历史样本回测评估“通过率 vs 坏账率”的平衡。
-7.  **联机模拟监测**：基于 Bootstrap 生成模拟流量，动态监控指标漂移情况，实现线上稳定性实时预警。
+1. **数据资产上传**：上传 CSV 数据集。系统自动执行数据清洗与 **L1 基础分析**（去除缺失率/方差不足特征）。
+2. **多集变量分析**：灵活定义划分比例，对比训练集/验证集与测试集 (OOT) 的 IV、PSI 稳定性指标。
+3. **变量筛选 L2**：基于 IV、相关性、PSI 阈值执行自动变量剔除，锁定入模最佳特征池。
+4. **智能建模调优**：集成 **Optuna** 深度寻优算法，基于贝叶斯策略自动调参，并一键完成评分卡转换（支持 PDO/基准分调整）。
+5. **专业模型报告**：后台渲染 KS/AUC 曲线图与分箱分布图，支持导出内嵌特征分析详情的 Excel 企业级报告。
+6. **策略挖掘回测**：基于决策树自动挖掘拦截规则，通过历史样本回测评估“通过率 vs 坏账率”的平衡。
+7. **联机模拟监测**：基于 Bootstrap 生成模拟流量，动态监控指标漂移情况，实现线上稳定性实时预警。
 
 ---
 
@@ -71,52 +76,52 @@
 
 ```mermaid
 graph TB
-    subgraph Frontend [前端 UI 层 (React + AntD + Vite)]
-        UI_Auth[权限与工作台模块]
-        UI_Data[数据资产与初筛可视化]
-        UI_Feat[特征分箱与PSI/IV大盘]
-        UI_Model[模型调优设置与进度监控]
-        UI_Report[模型报告下载与可视化评估]
-        UI_Strategy[策略编排挖掘与回测推演]
-        UI_Monitor[上线部署与分布偏移监测]
+    subgraph Frontend ["前端 UI 层 (React + AntD + Vite)"]
+        UI_Auth["权限与工作台模块"]
+        UI_Data["数据资产与初筛可视化"]
+        UI_Feat["特征分箱与PSI/IV大盘"]
+        UI_Model["模型调优设置与进度监控"]
+        UI_Report["模型报告下载与可视化评估"]
+        UI_Strategy["策略编排挖掘与回测推演"]
+        UI_Monitor["上线部署与分布偏移监测"]
     end
 
-    subgraph Backend_API [后端网关暴露层 (FastAPI)]
-        API_Auth([Auth.py])
-        API_Project([Project.py])
-        API_Dataset([Dataset.py])
-        API_Feature([Feature.py])
-        API_Modeling([Modeling.py])
-        API_Strategy([Strategy.py])
+    subgraph Backend_API ["后端网关暴露层 (FastAPI)"]
+        API_Auth(["Auth.py"])
+        API_Project(["Project.py"])
+        API_Dataset(["Dataset.py"])
+        API_Feature(["Feature.py"])
+        API_Modeling(["Modeling.py"])
+        API_Strategy(["Strategy.py"])
     end
 
-    subgraph Backend_Task [异步调度与保障层 (TaskManager)]
-        Task_Queue[SQLite/PG 状态调度]
-        Heartbeat[任务心跳保护与进程树销毁]
+    subgraph Backend_Task ["异步调度与保障层 (TaskManager)"]
+        Task_Queue["SQLite/PG 状态调度"]
+        Heartbeat["任务心跳保护与进程树销毁"]
     end
 
-    subgraph Backend_Core [核心算法引擎 (scorecard_core)]
-        Core_Data[[data_processor: 异常值与同值率初筛]]
-        Core_Feat[[feature_engineer: WOE分箱与PSI剔除]]
-        Core_Train[[model_trainer: Optuna寻参转评分卡]]
-        Core_Report[[report: 评估曲线与报告生成]]
-        Core_Mining[[strategy_mining: 决策树基发掘]]
-        Core_Engine[[strategy_engine: 规则推演拦截库]]
-        Core_Monitor[[monitor_engine: 打分分布偏移估算]]
+    subgraph Backend_Core ["核心算法引擎 (scorecard_core)"]
+        Core_Data[["data_processor: 异常值与同值率初筛"]]
+        Core_Feat[["feature_engineer: WOE分箱与PSI剔除"]]
+        Core_Train[["model_trainer: Optuna寻参转评分卡"]]
+        Core_Report[["report: 评估曲线与报告生成"]]
+        Core_Mining[["strategy_mining: 决策树基发掘"]]
+        Core_Engine[["strategy_engine: 规则推演拦截库"]]
+        Core_Monitor[["monitor_engine: 打分分布偏移估算"]]
     end
 
-    subgraph Database [持久层 (PostgreSQL / SQLite)]
-        DB_Users[(Users)]
-        DB_Projects[(Projects/Datasets)]
-        DB_Tasks[(Tasks / ModelResults)]
-        DB_Deploy[(Deployments/Logs)]
-        DB_Strategy[(Strategies)]
+    subgraph Database ["持久层 (PostgreSQL / SQLite)"]
+        DB_Users[("Users")]
+        DB_Projects[("Projects / Datasets")]
+        DB_Tasks[("Tasks / ModelResults")]
+        DB_Deploy[("Deployments / Logs")]
+        DB_Strategy[("Strategies")]
     end
 
-    subgraph Storage [持久文件 (Storage)]
-        S_CSV(样本 CSV)
-        S_BIN(Pickle 模型)
-        S_EXCEL(离线报告图表)
+    subgraph Storage ["持久文件 (Storage)"]
+        S_CSV("样本 CSV")
+        S_BIN("Pickle 模型")
+        S_EXCEL("离线报告图表")
     end
 
     Frontend == 携带 JWT ===> Backend_API
