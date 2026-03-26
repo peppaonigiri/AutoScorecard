@@ -124,23 +124,23 @@ graph TB
         S_EXCEL("离线报告图表")
     end
 
-    Frontend == 携带 JWT ===> Backend_API
+    Frontend -->|"携带 JWT"| Backend_API
     Backend_API --> Task_Queue
     Backend_API --> Core_Data
     Backend_API --> Core_Feat
     API_Strategy --> Core_Mining
     API_Strategy --> Core_Engine
-    Task_Queue -. 唤起子进程 .-> Core_Train
-    Heartbeat -. 中断拦截 .-> Core_Train
+    Task_Queue -.->|"唤起子进程"| Core_Train
+    Heartbeat -.->|"中断拦截"| Core_Train
     Core_Train --> Core_Report
     Backend_API <--> Database
     Core_Data --> S_CSV
     Core_Train --> S_BIN
     Core_Report --> S_EXCEL
-    Core_Data ..> DB_Projects
-    Core_Train ..> DB_Tasks
-    Core_Monitor ..> DB_Deploy
-    Core_Engine ..> DB_Strategy
+    Core_Data -.-> DB_Projects
+    Core_Train -.-> DB_Tasks
+    Core_Monitor -.-> DB_Deploy
+    Core_Engine -.-> DB_Strategy
 ```
 
 ---
