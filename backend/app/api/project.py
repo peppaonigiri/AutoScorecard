@@ -14,7 +14,7 @@ from app.config import UPLOAD_DIR
 from app.models import Project, Dataset, ModelResult, Deployment, User
 from app.schemas import (
     ProjectCreate, ProjectResponse, ProjectListResponse, DatasetResponse,
-    DeploymentRequest, DeploymentResponse, ProjectVisibilityUpdate
+    DeploymentRequest, DeploymentResponse, ProjectVisibilityUpdate, ProjectExcludeColsUpdate
 )
 from app.api.auth import get_current_user
 
@@ -107,6 +107,25 @@ def update_visibility(project_id: int, req: ProjectVisibilityUpdate, db: Session
     return project
 
 
+@router.put('/{project_id}/exclude-cols', response_model=ProjectResponse)
+def update_exclude_cols(project_id: int, req: ProjectExcludeColsUpdate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    """更新项目的全局排除列"""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail='项目不存在')
+        
+    # 只有所有者或管理员可以修改
+    if project.owner_id != current_user.id and not current_user.is_admin:
+        raise HTTPException(status_code=403, detail='无权修改该项目')
+        
+    project.exclude_cols = req.exclude_cols
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+    project.owner_name = project.owner.username if project.owner else "系统"
+    return project
+
+
 @router.get('/{project_id}/datasets', response_model=List[DatasetResponse])
 def list_datasets(project_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     """获取项目下的所有数据集"""
@@ -160,6 +179,7 @@ def upload_dataset(project_id: int, file: UploadFile = File(...), db: Session = 
 
 @router.delete('/{project_id}')
 def delete_project(project_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    """删除项目及其所有关联的物理文件"""
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail='项目不存在')
@@ -167,24 +187,47 @@ def delete_project(project_id: int, db: Session = Depends(get_db), current_user 
     # 只有所有者或管理员可以删除
     if project.owner_id != current_user.id and not current_user.is_admin:
         raise HTTPException(status_code=403, detail='无权删除该项目')
+
+    # 清理物理文件：模型报告 (.xlsx)
+    from app.models import ModelReport, MonitoringLog, StrategyMonitoringLog, Strategy
+    for report in db.query(ModelReport).filter(ModelReport.project_id == project_id).all():
+        if report.file_path and os.path.exists(report.file_path):
+            try: os.remove(report.file_path)
+            except Exception: pass
+
+    # 清理物理文件：模型 (.pkl)
+    for mr in db.query(ModelResult).filter(ModelResult.project_id == project_id).all():
+        if mr.model_path and os.path.exists(mr.model_path):
+            try: os.remove(mr.model_path)
+            except Exception: pass
+
+    # 清理物理文件：数据集 (csv/parquet，含派生填充文件)
+    for ds in db.query(Dataset).filter(Dataset.project_id == project_id).all():
+        if ds.file_path and os.path.exists(ds.file_path):
+            try: os.remove(ds.file_path)
+            except Exception: pass
+
+    # 删除项目上传目录
+    project_dir = os.path.join(UPLOAD_DIR, str(project_id))
+    if os.path.isdir(project_dir):
+        shutil.rmtree(project_dir, ignore_errors=True)
         
+    # ORM 级联删除 (cascade='all, delete-orphan' 会处理关联表)
     db.delete(project)
     db.commit()
     return {'message': '已删除'}
 
 @router.post('/{project_id}/deploy')
 def deploy_model(project_id: int, req: DeploymentRequest, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    """上线模型"""
     # 权限检查
     check_project_access(project_id, db, current_user, need_write=True)
-    """上线模型"""
-    print(f"DEBUG: 接收到上线请求 - 项目 ID: {project_id}, 模型 ID: {req.model_result_id}")
     try:
         result = db.query(ModelResult).filter(
             ModelResult.id == req.model_result_id,
             ModelResult.project_id == project_id
         ).first()
         if not result:
-            print("DEBUG: 未找到模型结果")
             raise HTTPException(status_code=404, detail='模型结果不存在或不属于该项目')
         
         existing = db.query(Deployment).filter(
@@ -192,8 +235,6 @@ def deploy_model(project_id: int, req: DeploymentRequest, db: Session = Depends(
             Deployment.status == 'active'
         ).first()
         if existing:
-            print(f"DEBUG: 模型已上线 ID: {existing.id}")
-            # 手动转换为字典
             return {
                 "id": existing.id,
                 "project_id": existing.project_id,
@@ -202,7 +243,6 @@ def deploy_model(project_id: int, req: DeploymentRequest, db: Session = Depends(
                 "deployed_at": existing.deployed_at.isoformat() if existing.deployed_at else None
             }
         
-        print("DEBUG: 正在创建新部署...")
         deployment = Deployment(
             project_id=project_id,
             model_result_id=result.id,
@@ -211,7 +251,7 @@ def deploy_model(project_id: int, req: DeploymentRequest, db: Session = Depends(
         db.add(deployment)
         db.commit()
         db.refresh(deployment)
-        print(f"DEBUG: 部署创建成功 ID: {deployment.id}")
+        
         
         return {
             "id": deployment.id,

@@ -60,6 +60,9 @@ class ProjectResponse(BaseModel):
     owner_name: Optional[str] = None
     is_public: int = 0
     feature_list: List[str] = []
+    exclude_cols: List[str] = []
+    iv_report: List[Any] = []
+    filter_result: Optional[Dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime
 
@@ -68,6 +71,9 @@ class ProjectResponse(BaseModel):
 
 class ProjectVisibilityUpdate(BaseModel):
     is_public: int
+
+class ProjectExcludeColsUpdate(BaseModel):
+    exclude_cols: List[str]
 
 class ProjectListResponse(BaseModel):
     total: int
@@ -97,6 +103,10 @@ class DataPreviewResponse(BaseModel):
     dtypes: Dict[str, str]
     data: List[Dict[str, Any]]
     total_rows: int
+
+class ImputeRequest(BaseModel):
+    fill_value: float = -999.0
+    exclude_cols: List[str] = []
 
 class DataStatsResponse(BaseModel):
     n_rows: int

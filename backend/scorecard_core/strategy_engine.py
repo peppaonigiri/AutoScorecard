@@ -65,7 +65,8 @@ def enrich_df_with_model_scores(df: pd.DataFrame, rules: List[Dict], db_session,
             )
             df[f'_model_result_{mid}'] = scores
         except Exception as e:
-            print(f" enrichment 失败: {e}")
+            import logging
+            logging.warning(f"model enrichment 失败: {e}")
             
     return df
 

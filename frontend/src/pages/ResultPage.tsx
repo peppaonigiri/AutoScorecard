@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Table, Descriptions, Typography, Row, Col, message, Switch, Space, Tag, Button, Modal, Tabs, Progress } from 'antd';
-import { CheckCircleOutlined, FileTextOutlined, DownloadOutlined } from '@ant-design/icons';
+import { Card, Table, Descriptions, Typography, Row, Col, message, Switch, Space, Tag, Button, Modal, Tabs, Progress, Popconfirm } from 'antd';
+import { CheckCircleOutlined, FileTextOutlined, DownloadOutlined, DeleteOutlined } from '@ant-design/icons';
 import api from '../services/api';
 import { useAppStore } from '../stores';
 
@@ -36,6 +36,18 @@ const ResultPage: React.FC = () => {
             fetchResults();
         } catch (err: any) {
             message.error('切换状态失败');
+        }
+    };
+
+    const handleDeleteModel = async (resultId: number) => {
+        if (!currentProjectId) return;
+        try {
+            await api.delete(`/projects/${currentProjectId}/models/${resultId}`);
+            message.success('模型删除成功');
+            fetchResults();
+        } catch (err: any) {
+            const detail = err.response?.data?.detail || '删除失败';
+            message.error(`删除失败: ${detail}`);
         }
     };
 
@@ -200,6 +212,18 @@ const ResultPage: React.FC = () => {
                                 >
                                     查看报表
                                 </Button>
+                                <Popconfirm
+                                    title="确认删除该模型吗？"
+                                    description="删除将清理所有的监控、报表数据和物理文件，无法恢复。如果模型已上线，请先下线。"
+                                    onConfirm={() => handleDeleteModel(result.id)}
+                                    okText="确认删除"
+                                    cancelText="取消"
+                                    okButtonProps={{ danger: true }}
+                                >
+                                    <Button danger icon={<DeleteOutlined />}>
+                                        删除
+                                    </Button>
+                                </Popconfirm>
                             </Space>
                         }
                     >

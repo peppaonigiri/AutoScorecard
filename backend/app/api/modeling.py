@@ -201,6 +201,63 @@ def update_model_status(project_id: int, result_id: int, status_req: Dict[str, s
     return {"message": "状态更新成功"}
 
 
+@router.delete('/projects/{project_id}/models/{result_id}')
+def delete_model(project_id: int, result_id: int, db: Session = Depends(get_db)):
+    """删除指定的训练模型及其关联文件、日志"""
+    result = db.query(ModelResult).filter(
+        ModelResult.id == result_id, 
+        ModelResult.project_id == project_id
+    ).first()
+    
+    if not result:
+        raise HTTPException(status_code=404, detail="模型不存在")
+
+    # 1. 检查是否为当前正上线的模型，若是则不允许直接删除
+    active_dep = db.query(Deployment).filter(
+        Deployment.model_result_id == result_id,
+        Deployment.status == 'active'
+    ).first()
+    if active_dep:
+        raise HTTPException(status_code=400, detail="处于上线(活跃)状态的模型不允许删除，请先下线")
+
+    try:
+        # 2. 删除相关的模型分析报告及物理文件
+        reports = db.query(ModelReport).filter(ModelReport.model_result_id == result_id).all()
+        for report in reports:
+            if report.file_path and os.path.exists(report.file_path):
+                try:
+                    os.remove(report.file_path)
+                except Exception:
+                    pass
+            db.delete(report)
+
+        # 3. 删除相关的 Deployment 及相关的业务进件模拟日志 MonitoringLog
+        deps = db.query(Deployment).filter(Deployment.model_result_id == result_id).all()
+        for dep in deps:
+            db.query(MonitoringLog).filter(MonitoringLog.deployment_id == dep.id).delete()
+            db.delete(dep)
+
+        # 4. 删除物理模型文件 (.pkl)
+        if result.model_path and os.path.exists(result.model_path):
+            try:
+                os.remove(result.model_path)
+            except Exception:
+                pass
+
+        # 5. 最后删除模型结果记录本身
+        db.delete(result)
+        db.commit()
+        
+    except Exception as e:
+        db.rollback()
+        import logging
+        logging.exception(f"删除模型时发生错误: {e}")
+        raise HTTPException(status_code=500, detail=f"内部错误: 无法完整删除该模型, {str(e)}")
+
+    return {"message": "模型删除成功"}
+
+
+
 @router.post('/projects/{project_id}/monitor/simulate_all')
 def simulate_all_monitor(project_id: int, db: Session = Depends(get_db)):
     """一键执行模型与策略全量监控模拟"""

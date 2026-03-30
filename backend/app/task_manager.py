@@ -52,9 +52,10 @@ def _run_task_wrapper(task_id: int, func: Callable, kwargs: dict) -> Any:
             if t:
                 db.refresh(t) # 强制刷入数据库最新的心跳时间
                 if HEARTBEAT_ENABLED and t.last_heartbeat:
-                    # 使用带时区的比较，增强鲁棒性
-                    now_dt = datetime.now(t.last_heartbeat.tzinfo)
-                    diff = (now_dt - t.last_heartbeat).total_seconds()
+                    # 统一使用 UTC 进行比较，避免时区错配
+                    hb = t.last_heartbeat.replace(tzinfo=timezone.utc) if t.last_heartbeat.tzinfo is None else t.last_heartbeat
+                    now_dt = datetime.now(timezone.utc)
+                    diff = (now_dt - hb).total_seconds()
                     
                     if diff > HEARTBEAT_TIMEOUT: # 使用配置的超时时间
                         logger.warning(f"任务 {task_id} 心跳超时 ({int(diff)}s)，由于页面可能已刷新或关闭，正在自动释放 CPU 资源...")

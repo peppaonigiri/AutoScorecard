@@ -58,9 +58,14 @@ def create_iv_report(project_id: int, req: IVReportRequest, db: Session = Depend
 
     # 计算多集 IV 和 PSI
     report = calc_multi_set_metrics(datasets, ft_lst, dep=req.dep)
+    features_list = report.to_dict(orient='records')
+
+    project.iv_report = features_list
+    db.add(project)
+    db.commit()
 
     return {
-        'features': report.to_dict(orient='records'),
+        'features': features_list,
         'total_features': len(ft_lst),
     }
 
@@ -100,10 +105,12 @@ def filter_features(project_id: int, req: FeatureFilterRequest, db: Session = De
 
     thresholds = req.thresholds.dict()
     # 执行筛选
-    result = do_filter(datasets, ft_lst, req.dep, thresholds, exclude_cols=default_exclude, skip_l1=req.skip_l1)
+    result = do_filter(datasets, ft_lst, req.dep, thresholds, exclude_cols=default_exclude, skip_l1=req.skip_l1, impute_value=dataset.impute_value)
 
-    # 持久化特征列表
+    # 持久化特征列表及筛选报告
     project.feature_list = result['kept_features']
+    project.filter_result = result
+    db.add(project)
     db.commit()
 
     return result

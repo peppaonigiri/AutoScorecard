@@ -44,7 +44,10 @@ class Project(Base):
 
     # 持久化状态
     feature_list = Column(JSON, default=list)  # 最近一次成功筛选或选择的特征列表
+    exclude_cols = Column(JSON, default=list)  # 全局排除的列名
     split_config = Column(JSON, default=dict)  # 数据集划分配置 {ratios, oot_col, oot_start_time}
+    iv_report = Column(JSON, default=list)     # 记录变量分析页的 IV 计算结果，用于回显
+    filter_result = Column(JSON, default=dict) # 记录变量分析页的筛选剔除结果摘要，用于回显
 
 
 class Dataset(Base):
@@ -61,6 +64,7 @@ class Dataset(Base):
     columns_info = Column(JSON, default=dict)  # {col_name: dtype, ...}
     stats_cache = Column(JSON, default=dict)   # 缓存的基础统计信息
     l1_results = Column(JSON, default=dict)    # L1 初筛结果 {kept, dropped_info}
+    impute_value = Column(Float, nullable=True, default=None)  # 填充值，None 表示未做过填充
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # 关联

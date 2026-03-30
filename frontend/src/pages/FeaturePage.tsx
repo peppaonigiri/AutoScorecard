@@ -20,6 +20,34 @@ const FeaturePage: React.FC = () => {
     const [loading, setLoading] = useState(false);
     const [filtering, setFiltering] = useState(false);
 
+    // 页面加载或切换项目时，尝试拉取持久化的多集报告和筛选结果
+    React.useEffect(() => {
+        const fetchSavedResults = async () => {
+            if (currentProjectId) {
+                try {
+                    const res: any = await api.get(`/projects/${currentProjectId}`);
+                    if (res.iv_report && res.iv_report.length > 0) {
+                        setIvReport(res.iv_report);
+                    } else {
+                        setIvReport([]); // 切换新项目时如果为空，也需要清空
+                    }
+
+                    if (res.filter_result && Object.keys(res.filter_result).length > 0) {
+                        setFilterResult(res.filter_result);
+                        if (res.filter_result.kept_features) {
+                            setSelectedFeatures(res.filter_result.kept_features);
+                        }
+                    } else {
+                        setFilterResult(null);
+                    }
+                } catch (e) {
+                    console.error('拉取项目持久化特征分析结果失败:', e);
+                }
+            }
+        };
+        fetchSavedResults();
+    }, [currentProjectId]);
+
     const fetchIvReport = async () => {
         if (!currentProjectId || !currentDatasetId) {
             message.warning('请先上传或选择数据集');

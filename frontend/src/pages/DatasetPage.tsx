@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Upload, Button, message, Table, Tabs, Descriptions, Statistic, Row, Col, Tag, Typography, InputNumber, Form, Space, Alert, Divider, Select } from 'antd';
-import { UploadOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import { Card, Upload, Button, message, Table, Tabs, Descriptions, Statistic, Row, Col, Tag, Typography, InputNumber, Form, Space, Alert, Divider, Select, Popconfirm } from 'antd';
+import { UploadOutlined, CheckCircleOutlined, DeleteOutlined } from '@ant-design/icons';
 import api from '../services/api';
 import { useAppStore } from '../stores';
 
@@ -19,7 +19,8 @@ const DatasetPage: React.FC = () => {
 
     const [uploading, setUploading] = useState(false);
     const [l1Loading, setL1Loading] = useState(false);
-    const [l1Triggered, setL1Triggered] = useState(false);
+    const [imputing, setImputing] = useState(false);
+    const [fillValue, setFillValue] = useState<number>(-999);
     const [datasets, setDatasets] = useState<any[]>([]);
     const [l1Form] = Form.useForm();
 
@@ -62,6 +63,31 @@ const DatasetPage: React.FC = () => {
             fetchStats(ds.id);
         }
         fetchPreview(ds.id);
+    };
+
+    // 获取项目的持久化配置（如全局排除列）
+    useEffect(() => {
+        if (currentProjectId) {
+            api.get(`/projects/${currentProjectId}`).then((res: any) => {
+                if (res.exclude_cols) {
+                    setExcludeCols(res.exclude_cols);
+                } else {
+                    setExcludeCols([]);
+                }
+            }).catch(e => console.error('加载项目配置失败', e));
+        }
+    }, [currentProjectId]);
+
+    const handleExcludeColsChange = async (cols: string[]) => {
+        setExcludeCols(cols);
+        if (currentProjectId) {
+            try {
+                await api.put(`/projects/${currentProjectId}/exclude-cols`, { exclude_cols: cols });
+            } catch (e) {
+                console.error('持久化保存排除列失败', e);
+                message.error('保存全局排除列失败');
+            }
+        }
     };
 
     const handleUpload = async (options: any) => {
@@ -107,6 +133,24 @@ const DatasetPage: React.FC = () => {
     if (!currentProjectId) {
         return <div>请先在左侧选择项目</div>;
     }
+
+    const handleDeleteDataset = async (dsId: number, dsName: string) => {
+        try {
+            await api.delete(`/datasets/${dsId}`);
+            message.success(`数据集 "${dsName}" 已删除`);
+            // 如果删除的是当前选中的，清空选中状态
+            if (dsId === currentDatasetId) {
+                setDatasetInfo(null);
+                setCurrentDatasetId(null);
+                setDatasetStats(null);
+                setPreviewData(null);
+            }
+            fetchDatasetList();
+        } catch (err: any) {
+            const detail = err.response?.data?.detail || '删除失败';
+            message.error(detail);
+        }
+    };
 
     // 构建预览表格的 columns
     const previewColumns = previewData?.columns?.map((col: string) => ({
@@ -177,12 +221,43 @@ const DatasetPage: React.FC = () => {
                     kept: res.kept_features
                 }
             });
-            setL1Triggered(true);
             message.success(`L1 初筛完成：保留 ${res.summary.total_kept} 个变量，剔除 ${res.summary.total_dropped} 个`);
         } catch (err) {
             message.error('L1 初筛失败');
         } finally {
             setL1Loading(false);
+        }
+    };
+
+    const handleImpute = async () => {
+        if (!currentDatasetId) return;
+        setImputing(true);
+        try {
+            const res: any = await api.post(`/datasets/${currentDatasetId}/impute`, {
+                fill_value: fillValue,
+                exclude_cols: Array.from(new Set(['id', 'uuid', 'user_id', 'date', ...excludeCols]))
+            });
+            message.success(res.message || '缺失值填充成功，已生成新数据集');
+
+            // 重新拉取数据集列表并动态选取
+            const dsRes: any = await api.get(`/projects/${currentProjectId}/datasets`);
+            setDatasets(dsRes);
+
+            // 如果后端返回了新生成的数据集分支 ID，自动切过去
+            if (res.new_dataset_id) {
+                const newDs = dsRes.find((d: any) => d.id === res.new_dataset_id);
+                if (newDs) {
+                    selectDataset(newDs);
+                }
+            } else {
+                fetchStats(currentDatasetId);
+                fetchPreview(currentDatasetId);
+            }
+        } catch (err: any) {
+            const detail = err.response?.data?.detail || '填充失败';
+            message.error(detail);
+        } finally {
+            setImputing(false);
         }
     };
 
@@ -206,6 +281,20 @@ const DatasetPage: React.FC = () => {
                             {datasets.map(ds => (
                                 <Option key={ds.id} value={ds.id}>
                                     {ds.name} (行:{ds.n_rows}) - {new Date(ds.created_at).toLocaleString()}
+                                    {datasets.length > 1 && (
+                                        <Popconfirm
+                                            title={`确认删除数据集 "${ds.name}" 吗？物理文件也将被清除。`}
+                                            onConfirm={(e) => { e?.stopPropagation(); handleDeleteDataset(ds.id, ds.name); }}
+                                            onCancel={(e) => e?.stopPropagation()}
+                                            okText="确认删除"
+                                            cancelText="取消"
+                                        >
+                                            <DeleteOutlined
+                                                style={{ color: '#ff4d4f', marginLeft: 8, float: 'right' }}
+                                                onClick={(e) => e.stopPropagation()}
+                                            />
+                                        </Popconfirm>
+                                    )}
                                 </Option>
                             ))}
                         </Select>
@@ -252,7 +341,7 @@ const DatasetPage: React.FC = () => {
                                 style={{ width: '100%' }}
                                 placeholder="点此选择或搜索需要排除的字段（如 ID、Date 等）"
                                 value={excludeCols}
-                                onChange={setExcludeCols}
+                                onChange={handleExcludeColsChange}
                                 allowClear
                                 options={datasetStats?.columns?.map((c: string) => ({ label: c, value: c }))}
                             />
@@ -285,7 +374,7 @@ const DatasetPage: React.FC = () => {
                         </Form.Item>
                     </Form>
 
-                    {l1Info && l1Triggered && (
+                    {l1Info && l1Info.kept && (
                         <Alert
                             style={{ marginTop: 16 }}
                             type="info"
@@ -336,6 +425,30 @@ const DatasetPage: React.FC = () => {
                             }
                         />
                     )}
+                </Card>
+            )}
+
+            {/* ===== 缺失值填充操作面板 ===== */}
+            {datasetInfo && (
+                <Card title="数据清洗：缺失值填充" style={{ marginBottom: 24 }}>
+                    <div style={{ marginBottom: 16 }}>
+                        <Text type="secondary">
+                            在 L1 筛选完成后，您可以对剩余变量进行缺失值补全。本功能会将除排除列外的所有 **数值型字段** 中的空值（NaN）用给定的常数进行填补（默认 <Text strong type="danger">-999</Text>）。
+                            <br />
+                            <Text type="warning">注：操作将不会覆盖当前文件，而是会自动生成一个以 "_已填充" 为后缀的全新数据集以保障安全对照。</Text>
+                        </Text>
+                    </div>
+                    <Space>
+                        <span style={{ marginLeft: 4 }}>填充值：</span>
+                        <InputNumber
+                            value={fillValue}
+                            onChange={(val) => setFillValue(val as number)}
+                            style={{ width: 120 }}
+                        />
+                        <Button type="primary" onClick={handleImpute} loading={imputing}>
+                            保存并执行填充
+                        </Button>
+                    </Space>
                 </Card>
             )}
 

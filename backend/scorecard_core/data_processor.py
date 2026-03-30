@@ -16,10 +16,9 @@ def load_data(file_path):
         return pd.read_csv(file_path)
 
 
-def get_basic_stats(df, dep='label'):
+def get_basic_stats(df, dep='label', impute_value=None):
     """获取数据基础统计信息"""
-    # 计算缺失率（将 -999 视为缺失）
-    missing_counts = (df.isnull() | (df == -999)).sum()
+    missing_counts = _calc_missing_counts(df, impute_value)
     stats = {
         'n_rows': len(df),
         'n_cols': len(df.columns),
@@ -138,13 +137,13 @@ def split_dataset(df, target_col='target', dep='label',
     return datasets
 
 
-def screen_features_basic(df, feature_cols, single_value_limit=0.95, null_limit=0.95):
+def screen_features_basic(df, feature_cols, single_value_limit=0.95, null_limit=0.95, impute_value=None):
     """
-    L1 基础特征筛选：按单一值率、缺失率、零标准差三个维度剔除无效特征。
+    L1 基础特征筛选：按缺失率、单一值率、零标准差三个维度剔除无效特征。
 
     返回:
         (kept_list, removed_dict)
-        removed_dict = {'single_value': [...], 'null_rate': [...], 'zero_std': [...]}
+        removed_dict = {'missing': [...], 'freq': [...], 'zero_std': [...]}
     """
     removed = {
         'missing': [],
@@ -159,13 +158,22 @@ def screen_features_basic(df, feature_cols, single_value_limit=0.95, null_limit=
             kept.append(col)
             continue
 
-        # 1. 缺失率 (含 -999)
-        null_rate = (df[col].isnull() | (df[col] == -999)).mean()
+        # 1. 缺失率（动态：如果有填充值则该值也算缺失）
+        if impute_value is not None and pd.api.types.is_numeric_dtype(df[col]):
+            null_rate = (df[col].isnull() | (df[col] == impute_value)).mean()
+        else:
+            null_rate = df[col].isnull().mean()
         if null_rate >= null_limit:
             removed['missing'].append(col)
             continue
 
-        # 2. 零方差 (零标准差)
+        # 2. 单一值占比过高
+        vc = df[col].value_counts(normalize=True)
+        if len(vc) > 0 and vc.iloc[0] >= single_value_limit:
+            removed['freq'].append(col)
+            continue
+
+        # 3. 零方差 (零标准差)
         if pd.api.types.is_numeric_dtype(df[col]):
             std_val = df[col].std()
             if std_val is not None and std_val == 0:
@@ -181,7 +189,17 @@ def screen_features_basic(df, feature_cols, single_value_limit=0.95, null_limit=
     return kept, removed
 
 
-def calculate_dataset_summary(df, dep='label', thresholds=None):
+def _calc_missing_counts(df, impute_value=None):
+    """统一的缺失计数逻辑：NaN + 可选的填充值（仅数值列）"""
+    missing_counts = df.isnull().sum()
+    if impute_value is not None:
+        numeric_cols = df.select_dtypes(include=['number']).columns
+        for col in numeric_cols:
+            missing_counts[col] = (df[col].isnull() | (df[col] == impute_value)).sum()
+    return missing_counts
+
+
+def calculate_dataset_summary(df, dep='label', thresholds=None, impute_value=None):
     """
     计算数据集完整统计信息（包含分位数和 L1 初筛结果）
     用于在数据上传后进行持久化缓存。
@@ -190,8 +208,7 @@ def calculate_dataset_summary(df, dep='label', thresholds=None):
         thresholds = {'freq': 0.95, 'missing': 0.95}
 
     total_rows = len(df)
-    # 计算缺失率（将 -999 视为缺失）
-    missing_counts = (df.isnull() | (df == -999)).sum()
+    missing_counts = _calc_missing_counts(df, impute_value)
     stats = {
         'n_rows': total_rows,
         'n_cols': len(df.columns),
@@ -221,7 +238,8 @@ def calculate_dataset_summary(df, dep='label', thresholds=None):
     
     l1_kept, l1_removed = screen_features_basic(df, potential_features, 
                                                 single_value_limit=thresholds.get('freq', 0.95), 
-                                                null_limit=thresholds.get('missing', 0.95))
+                                                null_limit=thresholds.get('missing', 0.95),
+                                                impute_value=impute_value)
     
     l1_results = {
         'kept': l1_kept,

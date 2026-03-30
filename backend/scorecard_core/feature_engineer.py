@@ -110,9 +110,15 @@ def _simple_iv(df, feature_cols, dep):
     return iv_dict
 
 
-def calc_missing_rate(df, feature_cols):
-    """计算缺失率（含 -999）"""
-    return ((df[feature_cols].isnull() | (df[feature_cols] == -999)).sum() / len(df)).to_dict()
+def calc_missing_rate(df, feature_cols, impute_value=None):
+    """计算缺失率（动态：如有填充值则将其视为缺失）"""
+    result = {}
+    for col in feature_cols:
+        if impute_value is not None and pd.api.types.is_numeric_dtype(df[col]):
+            result[col] = float((df[col].isnull() | (df[col] == impute_value)).mean())
+        else:
+            result[col] = float(df[col].isnull().mean())
+    return result
 
 
 def calc_std_ratio(df, feature_cols):
@@ -146,7 +152,7 @@ def calc_correlation(df, feature_cols):
     return corr_matrix.to_dict()
 
 
-def filter_features(df_or_datasets, feature_cols, dep, thresholds, exclude_cols=None, skip_l1=False):
+def filter_features(df_or_datasets, feature_cols, dep, thresholds, exclude_cols=None, skip_l1=False, impute_value=None):
     """
     多轮变量筛选（两层机制）
     L1 (统计): 单一值、缺失率、标准差
@@ -154,10 +160,11 @@ def filter_features(df_or_datasets, feature_cols, dep, thresholds, exclude_cols=
     
     thresholds: {missing, std, freq, iv, corr, psi}
     df_or_datasets: 可以是单一 DataFrame 或 {'train': df, 'valid': df, 'oot': df} 字典
+    impute_value: 填充值，None 表示未做过填充
     """
     import pandas as pd
     import numpy as np
-    print(f"DEBUG: filter_features thresholds={thresholds}")
+    logger.debug(f"filter_features thresholds={thresholds}")
     from scorecard_core.data_processor import screen_features_basic
     if isinstance(df_or_datasets, dict):
         df_main = df_or_datasets.get('train', next(iter(df_or_datasets.values())))
@@ -175,7 +182,8 @@ def filter_features(df_or_datasets, feature_cols, dep, thresholds, exclude_cols=
             df_main, 
             feature_cols, 
             single_value_limit=thresholds.get('freq', 0.95),
-            null_limit=thresholds.get('missing', 0.95)
+            null_limit=thresholds.get('missing', 0.95),
+            impute_value=impute_value
         )
         kept = l1_kept
         dropped = {
@@ -187,7 +195,7 @@ def filter_features(df_or_datasets, feature_cols, dep, thresholds, exclude_cols=
         kept = feature_cols
         dropped = {
             'missing': [], 'freq': [], 'zero_std': []
-        }
+        }   
     
     details = {}
 
@@ -205,7 +213,7 @@ def filter_features(df_or_datasets, feature_cols, dep, thresholds, exclude_cols=
     # PSI 筛选 (稳定性)
     psi_thresh = thresholds.get('psi', 0.1)
     drop_psi = []
-    for psi_col in ['psi_tv', 'psi_to']:
+    for psi_col in ['psi_tv', 'psi_to']:    
         if psi_col in report.columns:
             bad_psi = report[(report['var_names'].isin(kept)) & (report[psi_col] > psi_thresh)]['var_names'].tolist()
             drop_psi.extend(bad_psi)

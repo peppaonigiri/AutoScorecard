@@ -1,6 +1,7 @@
 -- AutoModeling PostgreSQL Database Initialization Script
 
 -- 1. Create Base Tables
+DROP TABLE IF EXISTS model_reports;
 DROP TABLE IF EXISTS strategy_monitoring_logs;
 DROP TABLE IF EXISTS strategies;
 DROP TABLE IF EXISTS monitoring_logs;
@@ -27,10 +28,15 @@ CREATE TABLE projects (
     name VARCHAR(200) NOT NULL,
     description TEXT DEFAULT '',
     status VARCHAR(50) DEFAULT 'created',
+    owner_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    is_public INTEGER DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     feature_list JSONB DEFAULT '[]',
-    split_config JSONB DEFAULT '{}'
+    exclude_cols JSONB DEFAULT '[]',
+    split_config JSONB DEFAULT '{}',
+    iv_report JSONB DEFAULT '[]',
+    filter_result JSONB DEFAULT '{}'
 );
 
 -- Datasets Table
@@ -45,6 +51,7 @@ CREATE TABLE datasets (
     columns_info JSONB DEFAULT '{}',
     stats_cache JSONB DEFAULT '{}',
     l1_results JSONB DEFAULT '{}',
+    impute_value FLOAT DEFAULT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -58,6 +65,7 @@ CREATE TABLE tasks (
     params JSONB DEFAULT '{}',
     result JSONB DEFAULT '{}',
     error_msg TEXT DEFAULT '',
+    last_heartbeat TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -129,6 +137,22 @@ CREATE TABLE strategy_monitoring_logs (
     hit_count INTEGER DEFAULT 0,
     approval_rate FLOAT DEFAULT 0.0,
     rule_stats JSONB DEFAULT '[]',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Model Reports Table
+CREATE TABLE model_reports (
+    id SERIAL PRIMARY KEY,
+    project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+    model_result_id INTEGER REFERENCES model_results(id) ON DELETE CASCADE,
+    data_summary JSONB DEFAULT '{}',
+    performance_eval JSONB DEFAULT '{}',
+    feature_importance JSONB DEFAULT '[]',
+    bin_details JSONB DEFAULT '[]',
+    lift_table JSONB DEFAULT '{}',
+    psi_train_oot JSONB DEFAULT '{}',
+    psi_monthly JSONB DEFAULT '{}',
+    file_path VARCHAR(500) DEFAULT '',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 

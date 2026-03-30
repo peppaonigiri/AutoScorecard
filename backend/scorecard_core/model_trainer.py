@@ -29,7 +29,7 @@ def param_xgb(trial, max_depth=6):
         "booster": "gbtree",
         "reg_lambda": trial.suggest_float("reg_lambda", 1e-8, 500.0, log=True),
         "reg_alpha": trial.suggest_float("reg_alpha", 1e-8, 1.0, log=True),
-        "n_estimators": trial.suggest_int("n_estimators", 30, 100, log=True),
+        "n_estimators": trial.suggest_int("n_estimators", 30, 400, log=True),
         "max_depth": trial.suggest_int("max_depth", 1, max_depth),
         "min_child_weight": trial.suggest_int("min_child_weight", 1, 50, log=True),
         "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
