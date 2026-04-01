@@ -13,11 +13,7 @@ from sklearn.metrics import roc_curve, roc_auc_score
 
 logger = logging.getLogger(__name__)
 
-# 将 scorecard 包加入 path
-_base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_scorecard_path = os.path.join(_base_dir, 'scorecard')
-if _scorecard_path not in sys.path:
-    sys.path.insert(0, _scorecard_path)
+
 
 
 # ===================== 模型参数模板 =====================

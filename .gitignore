@@ -60,3 +60,4 @@ frontend/.env.production.local
 scorecard/
 code_all_ipynbs/
 frp/
+sql/

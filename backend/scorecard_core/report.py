@@ -8,14 +8,8 @@ import re
 from datetime import datetime
 import json
 
-# 动态添加 scorecard 路径
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-SCORECARD_DIR = os.path.join(BASE_DIR, 'scorecard')
-if SCORECARD_DIR not in sys.path:
-    sys.path.append(SCORECARD_DIR)
-
 try:
-    from new_tools import new_psi, feature_plot_generator, iv_report
+    from scorecard_core import new_psi, feature_plot_generator, iv_report
 except ImportError:
     # 兼容性导入，如果结构不同可能需要调整
     pass

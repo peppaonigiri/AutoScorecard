@@ -187,14 +187,8 @@ def binning_explorer(dataset_id: int, req: BinningExplorerRequest, db: Session =
 
         import os
         import sys
-        # 动态添加 scorecard 路径 (dataset.py 在 backend/app/api 下，需回退 4 层)
-        _api_dir = os.path.dirname(os.path.abspath(__file__))
-        _root_dir = os.path.dirname(os.path.dirname(os.path.dirname(_api_dir)))
-        _scorecard_dir = os.path.join(_root_dir, 'scorecard')
-        if _scorecard_dir not in sys.path:
-            sys.path.append(_scorecard_dir)
-
-        from new_tools.iv_report import IVCalculator
+        
+        from scorecard_core.iv_report import IVCalculator
         from scorecard_core.report import clean_serializable
         import toad
 

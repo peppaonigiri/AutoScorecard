@@ -5,17 +5,7 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict, Any
 
-# 动态添加 scorecard 路径
-_current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-_scorecard_dir = os.path.join(_current_dir, 'scorecard')
-if _scorecard_dir not in sys.path:
-    sys.path.append(_scorecard_dir)
-
-try:
-    from new_tools.rules_from_tree import RulesFromTree
-except ImportError:
-    # 兼容性导入
-    from scorecard.new_tools.rules_from_tree import RulesFromTree
+from .rules_from_tree import RulesFromTree
 
 def run_auto_mining(
     df: pd.DataFrame,
