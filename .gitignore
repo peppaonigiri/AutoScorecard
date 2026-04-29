@@ -29,6 +29,7 @@ backend/scorecard.db.bak
 # Logs
 *.log
 backend/backend.log
+backend/app/__pycache__/
 
 # Storage (Ignore all sub-folders content but keep folders/placeholders)
 storage/uploads/*
@@ -61,3 +62,6 @@ scorecard/
 code_all_ipynbs/
 frp/
 sql/
+
+# log
+.log

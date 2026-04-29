@@ -325,7 +325,9 @@ class RulesFromTree:
         shot_rate_all = all_all / all_total if all_total > 0 else 0
 
         # psi = sum((实际占比-预期占比)* ln(实际占比/预期占比))
-        psi = (badrate_test-badrate_train) * np.log(badrate_test/badrate_train if badrate_train > 0 else 1)
+        b_train_eps = badrate_train if badrate_train > 0 else 1e-6
+        b_test_eps = badrate_test if badrate_test > 0 else 1e-6
+        psi = float((badrate_test - badrate_train) * np.log(b_test_eps / b_train_eps))
         
         return (rule, [bad_train, good_train, all_train, badrate_train, lift_train, shot_rate_train,
                     bad_test, good_test, all_test, badrate_test, lift_test, shot_rate_test,
