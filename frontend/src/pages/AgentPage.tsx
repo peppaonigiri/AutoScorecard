@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
-    Input, Button, Tag, Typography, Space, Alert, Empty,
+    Input, Button, Tag, Typography, Space, Alert,
     Select, InputNumber, Tooltip, Table
 } from 'antd';
 import {
@@ -15,7 +15,7 @@ import remarkGfm from 'remark-gfm';
 import { useAppStore } from '../stores';
 import { useUserStore } from '../stores/userStore';
 
-const { Text, Paragraph } = Typography;
+const { Text } = Typography;
 const { TextArea } = Input;
 const { Option } = Select;
 
