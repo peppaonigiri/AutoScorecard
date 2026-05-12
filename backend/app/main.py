@@ -39,7 +39,7 @@ app.add_middleware(
 )
 
 # 延迟导入 API 模块，防止循环引用
-from app.api import project, dataset, feature, modeling, strategy, auth, users
+from app.api import project, dataset, feature, modeling, strategy, auth, users, agent
 
 app.include_router(auth.router)
 app.include_router(users.router)
@@ -48,6 +48,7 @@ app.include_router(dataset.router)
 app.include_router(feature.router)
 app.include_router(modeling.router)
 app.include_router(strategy.router)
+app.include_router(agent.router)    # LLM Agent
 
 @app.on_event('startup')
 def startup():

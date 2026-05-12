@@ -52,3 +52,13 @@ DEFAULT_MODEL_TYPE = _cfg['modeling']['default_model_type']
 
 # scorecard 包路径（原始工具包）
 SCORECARD_PATH = os.path.join(BASE_DIR, 'scorecard')
+
+# LLM Agent 配置
+_agent_cfg = _cfg.get('agent', {})
+AGENT_ENABLED       = _agent_cfg.get('enabled', False)
+AGENT_API_KEY       = _agent_cfg.get('llm_api_key', '')
+AGENT_BASE_URL      = _agent_cfg.get('llm_base_url', 'https://api.deepseek.com')
+AGENT_MODEL         = _agent_cfg.get('llm_model', 'deepseek-chat')
+AGENT_TIMEOUT       = _agent_cfg.get('llm_timeout', 120)
+AGENT_POLL_INTERVAL = _agent_cfg.get('poll_interval', 10)
+AGENT_HB_INTERVAL   = _agent_cfg.get('heartbeat_interval', 30)

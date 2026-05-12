@@ -16,6 +16,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import LoginPage from './pages/LoginPage';
 import ProfilePage from './pages/ProfilePage';
 import AdminUserPage from './pages/AdminUserPage';
+import AgentPage from './pages/AgentPage';
 
 const App: React.FC = () => {
     return (
@@ -33,6 +34,7 @@ const App: React.FC = () => {
                             <Route path="/results" element={<ResultPage />} />
                             <Route path="/strategy" element={<StrategyPage />} />
                             <Route path="/monitor" element={<MonitorPage />} />
+                            <Route path="/agent" element={<AgentPage />} />
 
                             <Route path="/profile" element={<ProfilePage />} />
                             <Route path="/admin/users" element={<AdminUserPage />} />

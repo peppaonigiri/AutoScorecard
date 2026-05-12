@@ -106,14 +106,16 @@ def generate_model_report(data_end, model, keep_lst, save_dir, model_id, res_dat
         info_df.drop(columns=['badrate_weight'], axis=1, inplace=True, errors='ignore')
 
     # 3. Lift 表 (lift_df)
-    tag_list = [['train'], ['valid'], ['oot']]
-    tag_list_str = [str(i) for i in tag_list]
+    tag_list = ['train', 'valid', 'oot']
+    tag_list_str = tag_list
     df_list_lift = []
-    for tag in tag_list:
-        temp_df_sub = data_end[data_end[target_col].isin(tag)]
+    for tag_val in tag_list:
+        # isin 需要传入列表
+        temp_df_sub = data_end[data_end[target_col].isin([tag_val])]
         if not temp_df_sub.empty:
             score_ks = toad.metrics.KS_bucket(temp_df_sub['proba'], temp_df_sub[label_col], bucket=10)
-            lift_df_diff = score_ks[['min', 'max', 'lift', 'cum_lift']]
+            # 保留更多核心指标用于策略制定 (注意匹配 toad 的列名: total_prop, cum_total_prop)
+            lift_df_diff = score_ks[['min', 'max', 'bad_rate', 'total_prop', 'cum_bad_rate', 'cum_total_prop']]
             df_list_lift.append(lift_df_diff)
         else:
             df_list_lift.append(pd.DataFrame())
@@ -300,10 +302,32 @@ def run_report_task(db, task_id, progress_callback, project_id, model_result_id,
     if not model_result:
         raise Exception("模型结果未找到")
         
-    # 加载数据集
-    dataset = db.query(Dataset).filter(Dataset.project_id == project_id).first() # 默认取第一个
+    # 加载数据集：优先从 model_result.params 取 dataset_id，精确匹配
+    from app.models import Task as TaskModel
+    model_params = model_result.params or {}
+    dataset_id_from_params = model_params.get('dataset_id')
+
+    # 兜底：从关联的 Task.params 取（老数据 ModelResult.params 没存 dataset_id）
+    if not dataset_id_from_params and model_result.task_id:
+        task_obj = db.query(TaskModel).filter(TaskModel.id == model_result.task_id).first()
+        if task_obj and task_obj.params:
+            dataset_id_from_params = task_obj.params.get('dataset_id')
+
+    if dataset_id_from_params:
+        dataset = db.query(Dataset).filter(
+            Dataset.id == dataset_id_from_params,
+            Dataset.project_id == project_id
+        ).first()
+        if not dataset:
+            dataset = db.query(Dataset).filter(Dataset.project_id == project_id).first()
+    else:
+        dataset = db.query(Dataset).filter(Dataset.project_id == project_id).first()
+
     if not dataset:
-        raise Exception("未找到关联数据集")
+        raise Exception(
+            f"未找到关联数据集（project_id={project_id}，"
+            f"dataset_id={dataset_id_from_params or '未记录'}）"
+        )
         
     df = load_data(dataset.file_path)
     

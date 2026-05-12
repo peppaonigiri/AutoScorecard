@@ -422,19 +422,28 @@ def run_optuna_training(db, task_id, progress_callback,
             logger.error(f"计算分数分布失败: {e}")
 
     # 存储 ModelResult 到数据库
-    from app.models import ModelResult
+    from app.models import ModelResult, Task as TaskModel
+    # 从 Task 的 params 里取回 dataset_id（start_training 时存入的）
+    task_obj = db.query(TaskModel).filter(TaskModel.id == task_id).first()
+    task_params = (task_obj.params or {}) if task_obj else {}
+
     model_result = ModelResult(
         project_id=project_id,
         task_id=task_id,
         model_type=model_type,
         model_path=model_path,
-        params=best_params or {},
+        params={
+            **(best_params or {}),
+            # 追加关键上下文字段，供报告生成时使用
+            'dataset_id': task_params.get('dataset_id'),
+            'dep':        task_params.get('dep', dep),
+        },
         metrics=best_metrics or {},
         feature_importance=importance,
         feature_list=ft_lst,
         optuna_strategy=strategy_type,
         n_trials=n_trials,
-        score_config=sc,  # 保存实际使用的（可能是 auto 计算出的）配置
+        score_config=sc,
         score_distribution=score_dist
     )
     db.add(model_result)

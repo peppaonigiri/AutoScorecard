@@ -8,7 +8,8 @@ import {
     GatewayOutlined,
     RocketOutlined,
     LineChartOutlined,
-    AreaChartOutlined
+    AreaChartOutlined,
+    RobotOutlined
 } from '@ant-design/icons';
 import { useAppStore } from '../stores';
 import { useUserStore } from '../stores/userStore';
@@ -63,6 +64,12 @@ const MainLayout: React.FC = () => {
             key: '/monitor',
             icon: <LineChartOutlined />,
             label: '上线监控',
+            disabled: !currentProjectId,
+        },
+        {
+            key: '/agent',
+            icon: <RobotOutlined />,
+            label: '智能 Agent',
             disabled: !currentProjectId,
         },
     ];

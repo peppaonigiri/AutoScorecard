@@ -91,26 +91,37 @@ def run_strategy_analysis(df: pd.DataFrame, rules: List[Dict], combine_logic: st
         if field not in df.columns:
             continue
             
-        # 转换为数值类型进行比较（增强鲁棒性）
+        # 尝试统一转为数值进行比较
+        col_data = df[field]
+        val_final = val
         try:
-            col_data = pd.to_numeric(df[field], errors='coerce')
+            # 只有当两者都能转为数值时，才按数值比较
             val_num = float(val)
+            col_num = pd.to_numeric(df[field], errors='coerce')
+            if not col_num.isna().all():
+                col_data = col_num
+                val_final = val_num
         except:
-            col_data = df[field]
-            val_num = val
+            pass
+
+        # 安全比较：如果一侧是数字一侧是字符，强制转为字符防止报错
+        if pd.api.types.is_numeric_dtype(col_data) and isinstance(val_final, str):
+            col_data = col_data.astype(str)
+        elif not pd.api.types.is_numeric_dtype(col_data) and not isinstance(val_final, str):
+            val_final = str(val_final)
 
         if op == '>':
-            masks.append(col_data > val_num)
+            masks.append(col_data > val_final)
         elif op == '<':
-            masks.append(col_data < val_num)
+            masks.append(col_data < val_final)
         elif op == '>=':
-            masks.append(col_data >= val_num)
+            masks.append(col_data >= val_final)
         elif op == '<=':
-            masks.append(col_data <= val_num)
+            masks.append(col_data <= val_final)
         elif op == '==':
-            masks.append(col_data == val_num)
+            masks.append(col_data == val_final)
         elif op == '!=':
-            masks.append(col_data != val_num)
+            masks.append(col_data != val_final)
 
     if not masks:
         return {"error": "NO_VALID_RULES"}
@@ -222,17 +233,29 @@ def run_policy_flow(df: pd.DataFrame, strategies: List[Dict]) -> Dict[str, Any]:
         for r in rules:
             f, op, v = r['field'], r['op'], r['val']
             if f not in df.columns: continue
+            col_data = df[f]
+            v_final = v
             try:
-                col_data = pd.to_numeric(df[f], errors='coerce')
                 v_num = float(v)
+                c_num = pd.to_numeric(df[f], errors='coerce')
+                if not c_num.isna().all():
+                    col_data = c_num
+                    v_final = v_num
             except:
-                col_data, v_num = df[f], v
-            if op == '>': masks.append(col_data > v_num)
-            elif op == '<': masks.append(col_data < v_num)
-            elif op == '>=': masks.append(col_data >= v_num)
-            elif op == '<=': masks.append(col_data <= v_num)
-            elif op == '==': masks.append(col_data == v_num)
-            elif op == '!=': masks.append(col_data != v_num)
+                pass
+            
+            # 安全比较
+            if pd.api.types.is_numeric_dtype(col_data) and isinstance(v_final, str):
+                col_data = col_data.astype(str)
+            elif not pd.api.types.is_numeric_dtype(col_data) and not isinstance(v_final, str):
+                v_final = str(v_final)
+
+            if op == '>': masks.append(col_data > v_final)
+            elif op == '<': masks.append(col_data < v_final)
+            elif op == '>=': masks.append(col_data >= v_final)
+            elif op == '<=': masks.append(col_data <= v_final)
+            elif op == '==': masks.append(col_data == v_final)
+            elif op == '!=': masks.append(col_data != v_final)
         
         if not masks:
             # 规则无效，全部通过当前层
