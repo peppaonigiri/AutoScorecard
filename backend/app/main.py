@@ -20,7 +20,6 @@ matplotlib.use('Agg')
 
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import JSONResponse, FileResponse
 from sqlalchemy.orm import Session
@@ -39,9 +38,6 @@ app.add_middleware(
     allow_methods=['*'],
     allow_headers=['*'],
 )
-
-# 开启 Gzip 压缩
-app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # 延迟导入 API 模块，防止循环引用
 from app.api import project, dataset, feature, modeling, strategy, auth, users, agent
@@ -86,26 +82,38 @@ def startup():
 _project_root = os.path.dirname(_backend_root)
 frontend_dist = os.path.join(_project_root, 'frontend', 'dist')
 
-if os.path.exists(frontend_dist):
-    # 挂载静态文件
-    app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dist, "assets")), name="assets")
+# 挂载 /assets 目录 (如果存在)
+assets_dir = os.path.join(frontend_dist, "assets")
+if os.path.exists(assets_dir):
+    app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+# 捕获所有其他请求，返回 index.html (支持 SPA 路由)
+@app.get("/{full_path:path}")
+async def serve_frontend(full_path: str):
+    # 排除 API 路径
+    if full_path.startswith("api/") or full_path.startswith("v1/"):
+        return JSONResponse(status_code=404, content={"detail": "Not Found"})
     
-    # 捕获所有其他请求，返回 index.html (支持 SPA 路由)
-    @app.get("/{full_path:path}")
-    async def serve_frontend(full_path: str):
-        # 排除 API 路径
-        if full_path.startswith("api") or full_path.startswith("v1"):
-            raise HTTPException(status_code=404)
+    if not os.path.exists(frontend_dist):
+        return JSONResponse(
+            status_code=500, 
+            content={
+                "error": "前端未编译", 
+                "message": f"未找到前端编译目录 {frontend_dist}。请在服务器执行: cd {os.path.dirname(frontend_dist)} && npm install && npm run build"
+            }
+        )
+    
+    # 检查请求的文件是否存在（如 favicon.ico 等）
+    file_path = os.path.join(frontend_dist, full_path)
+    if full_path and os.path.isfile(file_path):
+        return FileResponse(file_path)
         
-        # 检查请求的文件是否存在（如 favicon.ico 等）
-        file_path = os.path.join(frontend_dist, full_path)
-        if os.path.isfile(file_path):
-            return FileResponse(file_path)
-            
-        # 默认返回 index.html
-        return FileResponse(os.path.join(frontend_dist, "index.html"))
-else:
-    logging.warning(f"Frontend dist directory not found at {frontend_dist}. Please run 'npm run build' in frontend directory.")
+    # 默认返回 index.html
+    index_path = os.path.join(frontend_dist, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    else:
+        return JSONResponse(status_code=404, content={"error": "index.html 不存在", "path": index_path})
 
 if __name__ == '__main__':
     import uvicorn

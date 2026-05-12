@@ -15,16 +15,16 @@ PYTHON_EXE="/opt/miniconda3/envs/scorecard/bin/python"
 echo "[0/3] 正在同步配置文件..."
 $PYTHON_EXE "$BASE_DIR/sync_config.py"
 
-echo "[1/2] 正在检查前端编译状态..."
+echo "[1/2] 正在编译前端代码 (生产环境优化)..."
 cd "$BASE_DIR/frontend"
-if [ ! -d "dist" ]; then
-    echo "未发现编译目录 dist，正在执行编译 (npm run build)..."
-    npm install && npm run build
-else
-    echo "发现已存在的 dist 目录，将使用生产环境包。"
+# 确保安装依赖并编译
+npm install && npm run build
+if [ $? -ne 0 ]; then
+    echo "❌ 前端编译失败！请检查上方的错误信息并修复代码后再启动。"
+    exit 1
 fi
 
-echo "[2/2] 正在启动后端服务 (FastAPI 托管前端)..."
+echo "[2/3] 正在启动后端服务 (FastAPI)..."
 # 使用 nohup 后台运行，并将日志输出到 backend.log
 cd "$BASE_DIR/backend"
 nohup $PYTHON_EXE app/main.py > "$BASE_DIR/backend.log" 2>&1 &
@@ -32,10 +32,18 @@ BACKEND_PID=$!
 
 sleep 2
 
+echo "[3/3] 正在启动前端服务 (使用高性能 preview 模式，端口 5173)..."
+cd "$BASE_DIR/frontend"
+nohup npm run preview > "$BASE_DIR/frontend.log" 2>&1 &
+FRONTEND_PID=$!
+
+sleep 2
+
 echo "=========================================="
 echo "项目启动完成！"
 echo "1. 后端 PID: $BACKEND_PID (日志: backend.log)"
-echo "2. 前端访问地址 (由后端托管): http://localhost:8081"
-echo "   (具体端口请参考 config.yaml 中的后端配置)"
+echo "2. 前端 PID: $FRONTEND_PID (日志: frontend.log)"
+echo "3. 访问地址: http://服务器IP:5173"
 echo "=========================================="
-echo "提示：使用 'kill $BACKEND_PID' 停止服务"
+echo "提示：使用 'kill $BACKEND_PID $FRONTEND_PID' 停止服务"
+
