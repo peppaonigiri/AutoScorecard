@@ -17,7 +17,8 @@ from sqlalchemy import func as sa_func
 from app.models import Project, Dataset, Task, ModelResult, ModelReport
 from app.config import (
     UPLOAD_DIR, MODEL_DIR,
-    AGENT_POLL_INTERVAL, AGENT_HB_INTERVAL
+    AGENT_POLL_INTERVAL, AGENT_HB_INTERVAL,
+    IMA_CLIENT_ID, IMA_API_KEY,
 )
 
 logger = logging.getLogger(__name__)
@@ -711,4 +712,59 @@ class AgentToolkit:
             }
         except Exception as e:
             logger.exception("list_active_strategies 失败")
+            return {"error": str(e)}
+
+    # ──────────────────────────────────────────────────────────
+    # IMA Skill Integration Tools
+    # ──────────────────────────────────────────────────────────
+    def read_ima_skill_doc(self, module: str) -> dict:
+        """读取 IMA skill 的帮助文档"""
+        base_dir = os.path.join(os.path.dirname(__file__), ".skills", "ima-skill")
+        if module == "main":
+            file_path = os.path.join(base_dir, "SKILL.md")
+        else:
+            file_path = os.path.join(base_dir, module, "SKILL.md")
+        if not os.path.exists(file_path):
+            return {"error": f"文档 {module} 不存在，路径: {file_path}"}
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            return {"content": content}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def call_ima_api(self, api_path: str, body: dict) -> dict:
+        """调用 IMA OpenAPI"""
+        import subprocess
+        import json
+        
+        # 从 config.yaml 读取 IMA API 凭证
+        opts = {"clientId": IMA_CLIENT_ID, "apiKey": IMA_API_KEY}
+        
+        script_path = os.path.join(os.path.dirname(__file__), ".skills", "ima-skill", "ima_api.cjs")
+        
+        try:
+            # 使用 node 运行 ima_api.cjs
+            result = subprocess.run(
+                ["node", script_path, api_path, json.dumps(body), json.dumps(opts)],
+                capture_output=True,
+                text=True,
+                encoding="utf-8"
+            )
+            
+            # ima_api.cjs 出错时会将错误信息写入 stderr
+            if result.returncode != 0:
+                try:
+                    err_json = json.loads(result.stderr)
+                    return {"error": err_json.get("msg", result.stderr)}
+                except:
+                    return {"error": result.stderr}
+                    
+            # 正常返回的 stdout 是目标 API 的 JSON 响应
+            try:
+                return json.loads(result.stdout)
+            except:
+                return {"raw_response": result.stdout}
+        except Exception as e:
+            logger.exception("call_ima_api 失败")
             return {"error": str(e)}

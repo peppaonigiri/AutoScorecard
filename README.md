@@ -12,6 +12,7 @@
 - **操作状态持久化**：L1 初筛结果、全局排除列配置、IV 分析报告、变量筛选摘要等操作结果全部持久化至数据库，刷新页面或切换功能后自动恢复展示。
 - **全链路接口鉴权**：所有数据操作接口均受 JWT 身份校验保护，写操作额外校验项目归属权限。
 - **无头绘图优化**：采用 Matplotlib `Agg` 非交互式后端，支持在无桌面环境服务器中稳定输出 Excel 报表与可视化图表。
+- **LLM Agent 对话建模**：内置 DeepSeek 驱动的智能 Agent（`/agent` 页面），支持通过自然语言完成数据探索、变量筛选、模型训练、策略挖掘等全流程操作，并可接入 IMA 外部知识库进行知识检索与记录。
 
 ---
 
@@ -19,7 +20,7 @@
 
 ### 1. 后端环境 (Backend Setup)
 
-- **Python 推荐**: Python 3.8 或更高版本（推荐使用 Conda 虚拟环境 `p_3_8_fb`）。
+- **Python 推荐**: Python 3.8 或更高版本。
 - **安装依赖**:
 
     ```bash
@@ -27,7 +28,11 @@
     pip install -r requirements.txt
     ```
 
-- **初始化**: 根目录下的 `config.yaml` 存储核心配置（如数据库、心跳开关）。首次运行前请执行 `init_scorecard.sql` 初始化表结构。
+- **配置敏感信息**: 根目录下的 `config.yaml` 存储所有核心配置。**首次使用前请参考以下步骤填写必要凭证**：
+  1. 将 `config.yaml` 复制为 `config_bak.yaml` 留存原始模板（已加入 `.gitignore`，不会入库）。
+  2. 在 `config.yaml` 的 `agent.llm_api_key` 字段填写 DeepSeek API Key。
+  3. 如需对接 IMA 外部知识库，在 `ima.client_id` 和 `ima.api_key` 填写对应凭证；不使用则留空即可。
+  4. 首次运行前请执行 `init_scorecard.sql` 初始化数据库表结构。
 
 ### 2. 前端环境 (Frontend Setup)
 
@@ -62,6 +67,7 @@
 8. **数据集管理**：支持数据集删除（含物理文件清理），自动防护正在使用中的数据集不被误删。
 9. **策略挖掘回测**：基于决策树自动挖掘拦截规则，通过历史样本回测评估“通过率 vs 坏账率”的平衡。
 10. **联机模拟监测**：基于 Bootstrap 生成模拟流量，动态监控指标漂移情况，实现线上稳定性实时预警。
+11. **Agent 对话建模**：进入顶部导航 `/agent` 页面，以自然语言向 AI 助手描述需求（如"帮我跑一下建模流程"），Agent 将自动编排并调用工具链完成任务，过程日志与结果实时推送到对话界面；如已配置 IMA 凭证，还可通过对话触发知识库存取操作。
 
 ---
 
@@ -73,6 +79,15 @@
 | **server** | `heartbeat_enabled` | **心跳开关**。控制关闭网页是否自动终断耗时后台任务。 |
 | **server** | `heartbeat_timeout` | **超时阔值**。心跳续约最大时间（建议 60-120 秒）。 |
 | **modeling** | `n_trials` | Optuna 进行参数寻优尝试的次数，值越大结果精度越高。 |
+| **agent** | `enabled` | Agent 功能总开关，设为 `false` 可关闭 `/agent` 页面入口。 |
+| **agent** | `llm_api_key` | ⚠️ **必填**。DeepSeek（或兼容 OpenAI 协议的）LLM API Key。 |
+| **agent** | `llm_base_url` | LLM 服务地址，默认 `https://api.deepseek.com`，可替换为其他兼容端点。 |
+| **agent** | `llm_model` | 调用的模型名称，默认 `deepseek-chat`。 |
+| **agent** | `llm_timeout` | 单次 LLM 请求最大超时秒数（默认 120）。 |
+| **agent** | `poll_interval` | Agent 内部轮询训练任务状态的间隔秒数（默认 10）。 |
+| **agent** | `heartbeat_interval` | Agent 向数据库刷新心跳的间隔秒数（默认 30）。 |
+| **ima** | `client_id` | IMA 外部知识库 Client ID，留空时 `call_ima_api` 工具不可用。 |
+| **ima** | `api_key` | IMA 外部知识库 API Key，与 `client_id` 配套填写。 |
 
 ---
 

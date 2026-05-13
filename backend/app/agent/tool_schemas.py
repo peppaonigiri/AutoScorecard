@@ -369,6 +369,35 @@ PHASE2_TOOLS = [
                 "required": ["project_id"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_ima_skill_doc",
+            "description": "读取 IMA 知识库/笔记技能的使用说明文档。如果用户要求操作知识库、笔记、存入文档等，请先调用此工具了解 API 用法。module 可填 'main', 'notes', 或 'knowledge-base'。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "module": {"type": "string", "enum": ["main", "notes", "knowledge-base"]}
+                },
+                "required": ["module"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "call_ima_api",
+            "description": "调用 IMA OpenAPI 进行知识库/笔记操作。使用前必须先阅读对应的 SKILL.md 文档了解 api_path 和 body 的具体结构。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "api_path": {"type": "string", "description": "API 路径，例如 'openapi/list_docs'"},
+                    "body": {"type": "object", "description": "请求体 JSON 对象"}
+                },
+                "required": ["api_path", "body"]
+            }
+        }
     }
 ]
 

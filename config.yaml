@@ -33,7 +33,12 @@ agent:
   llm_provider: deepseek              # 目前仅支持 deepseek（openai-compatible）
   llm_api_key: ""   # 替换为真实 Key
   llm_base_url: "https://api.deepseek.com"
-  llm_model: "deepseek-chat"          # deepseek-v3 对应的 chat 模型名
+  llm_model: "deepseek-chat"          
   llm_timeout: 120                    # 单次 LLM 请求超时（秒）
   poll_interval: 10                   # 训练任务轮询间隔（秒）
   heartbeat_interval: 30              # 心跳刷新间隔（秒）
+
+# IMA 外部知识库 API 凭证
+ima:
+  client_id: ""
+  api_key: ""

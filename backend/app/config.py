@@ -62,3 +62,8 @@ AGENT_MODEL         = _agent_cfg.get('llm_model', 'deepseek-chat')
 AGENT_TIMEOUT       = _agent_cfg.get('llm_timeout', 120)
 AGENT_POLL_INTERVAL = _agent_cfg.get('poll_interval', 10)
 AGENT_HB_INTERVAL   = _agent_cfg.get('heartbeat_interval', 30)
+
+# IMA 外部知识库 API 凭证
+_ima_cfg = _cfg.get('ima', {})
+IMA_CLIENT_ID = _ima_cfg.get('client_id', '')
+IMA_API_KEY   = _ima_cfg.get('api_key', '')

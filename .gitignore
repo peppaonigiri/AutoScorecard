@@ -65,3 +65,5 @@ sql/
 
 # log
 .log
+
+config_bak.yaml
