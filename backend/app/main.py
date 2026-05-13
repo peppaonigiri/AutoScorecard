@@ -8,6 +8,13 @@ import traceback
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 
+# ── Logging 配置：每条日志输出精确时间戳 ────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+
 # 绝对路径加固
 _current_dir = os.path.dirname(os.path.abspath(__file__)) 
 _backend_root = os.path.dirname(_current_dir) 
