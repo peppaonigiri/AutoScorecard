@@ -47,7 +47,7 @@ class AutoModelingAgent:
         # 通过显式设置 proxies=None 直连 DeepSeek API，绕过有问题的系统代理
         _http_client = httpx.AsyncClient(
             verify=False,
-            proxies={"all://": None},   # 禁用系统代理，直连
+            trust_env=False,  # 禁用系统代理，直连
         )
 
         self.llm = AsyncOpenAI(
