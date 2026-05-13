@@ -46,4 +46,3 @@ echo "2. 前端 PID: $FRONTEND_PID (日志: frontend.log)"
 echo "3. 访问地址: http://服务器IP:5173"
 echo "=========================================="
 echo "提示：使用 'kill $BACKEND_PID $FRONTEND_PID' 停止服务"
-
