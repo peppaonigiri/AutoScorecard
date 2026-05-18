@@ -524,10 +524,57 @@ class AgentToolkit:
             logger.exception("deploy_model 失败")
             return {"error": str(e)}
 
+    def analyze_strategy(self, project_id: int, dataset_id: int, rules: list, combine_logic: str = 'and', rule_type: str = 'reject', **kwargs) -> dict:
+        """运行单变量/多变量策略规则分析，返回拦截率、坏率等指标"""
+        from app.models import Dataset, ModelResult
+        import re
+        from scorecard_core.data_processor import load_data
+        from scorecard_core.strategy_engine import run_strategy_analysis, enrich_df_with_model_scores
+        
+        dataset = self.db.query(Dataset).filter(Dataset.id == dataset_id).first()
+        if not dataset:
+            return {"error": "数据集不存在"}
+            
+        model_id = kwargs.get('model_result_id')
+        parsed_rules = []
+        for r in rules:
+            if isinstance(r, dict):
+                rule_obj = r
+            else:
+                match = re.match(r"^\s*([a-zA-Z0-9_]+)\s*(>|<|>=|<=|==|!=)\s*(.+)$", str(r).strip())
+                if match:
+                    rule_obj = {
+                        "field": match.group(1),
+                        "op": match.group(2),
+                        "val": float(match.group(3)) if match.group(3).replace('.','',1).replace('-','',1).isdigit() else match.group(3).strip(),
+                        "logic": combine_logic
+                    }
+                else:
+                    rule_obj = {"field": "unknown_field", "op": "==", "val": str(r), "logic": combine_logic}
+            
+            if rule_obj['field'].lower() == 'score' and model_id:
+                rule_obj['field'] = f'_model_result_{model_id}'
+                
+            parsed_rules.append(rule_obj)
+            
+        try:
+            df = load_data(dataset.file_path)
+            df = enrich_df_with_model_scores(df, parsed_rules, self.db, ModelResult)
+            metrics = run_strategy_analysis(df, parsed_rules, combine_logic=combine_logic, rule_type=rule_type)
+            return {
+                "parsed_rules": parsed_rules,
+                "metrics": metrics
+            }
+        except Exception as e:
+            logger.exception("analyze_strategy 失败")
+            return {"error": str(e)}
+
     def deploy_strategy(self, project_id: int, rules: list, name: str = "自动生成策略", **kwargs) -> dict:
         """保存规则到 Strategy 表并置为 active"""
-        from app.models import Strategy
+        from app.models import Strategy, Dataset, ModelResult
         import re
+        from scorecard_core.data_processor import load_data
+        from scorecard_core.strategy_engine import run_strategy_analysis, enrich_df_with_model_scores
         
         model_id = kwargs.get('model_result_id')
         parsed_rules = []
@@ -554,12 +601,39 @@ class AgentToolkit:
                 
             parsed_rules.append(rule_obj)
             
+        metrics = {}
+        dataset_id = kwargs.get('dataset_id')
+        # 如果没有传 dataset_id，尝试从 project 下取最新数据集
+        if not dataset_id:
+            ds = self.db.query(Dataset).filter(Dataset.project_id == project_id).order_by(Dataset.id.desc()).first()
+            if ds:
+                dataset_id = ds.id
+
+        if dataset_id:
+            try:
+                ds = self.db.query(Dataset).filter(Dataset.id == dataset_id).first()
+                if ds:
+                    df = load_data(ds.file_path)
+                    df = enrich_df_with_model_scores(df, parsed_rules, self.db, ModelResult)
+                    # Agent 默认的合并逻辑为 and，类型为 reject
+                    metrics = run_strategy_analysis(df, parsed_rules, combine_logic='and', rule_type='reject')
+            except Exception as e:
+                logger.warning(f"自动计算策略指标失败: {e}")
+            
         try:
-            st = Strategy(project_id=project_id, name=name, rules=parsed_rules, status='active', priority=10, rule_type='reject')
+            st = Strategy(
+                project_id=project_id, 
+                name=name, 
+                rules=parsed_rules, 
+                status='active', 
+                priority=10, 
+                rule_type='reject',
+                metrics=metrics  # 保存指标
+            )
             self.db.add(st)
             self.db.commit()
             self.db.refresh(st)
-            return {"strategy_id": st.id, "status": "策略部署成功", "rules_count": len(parsed_rules)}
+            return {"strategy_id": st.id, "status": "策略部署成功", "rules_count": len(parsed_rules), "metrics": metrics}
         except Exception as e:
             logger.exception("deploy_strategy 失败")
             return {"error": str(e)}

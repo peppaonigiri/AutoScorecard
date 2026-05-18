@@ -263,6 +263,29 @@ PHASE2_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "analyze_strategy",
+            "description": "进行策略规则的单变量或多变量分析与测试，在实际部署前评估规则的拦截率、通过率、坏率等表现。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {"type": "integer"},
+                    "dataset_id": {"type": "integer", "description": "用于测试规则的数据集 ID"},
+                    "rules": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "需要测试的规则列表，如 ['age < 20', 'income > 5000']"
+                    },
+                    "combine_logic": {"type": "string", "enum": ["and", "or"], "default": "and"},
+                    "rule_type": {"type": "string", "enum": ["reject", "pass", "review"], "default": "reject"},
+                    "model_result_id": {"type": "integer", "description": "可选。如果测试分数策略（如 score < 450），需传入对应模型 ID"}
+                },
+                "required": ["project_id", "dataset_id", "rules"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "deploy_model",
             "description": "将选定的最优模型标记为上线部署状态，生成部署记录。",
             "parameters": {
