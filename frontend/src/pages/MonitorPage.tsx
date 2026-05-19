@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Button, Row, Col, Statistic, Table, Empty, message, Tag, Space, Typography, Tabs, Select, Divider, Modal } from 'antd';
+import { Card, Button, Row, Col, Statistic, Table, Empty, message, Tag, Space, Typography, Tabs, Select, Divider } from 'antd';
 const { Text } = Typography;
-const { Option } = Select;
-import { PlayCircleOutlined, DashboardOutlined, SafetyCertificateOutlined, LineChartOutlined, ArrowUpOutlined, ArrowDownOutlined, SwapOutlined } from '@ant-design/icons';
+import { PlayCircleOutlined, DashboardOutlined, SafetyCertificateOutlined, LineChartOutlined, SwapOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import api from '../services/api';
 import { useAppStore } from '../stores';
