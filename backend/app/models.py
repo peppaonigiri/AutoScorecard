@@ -176,6 +176,8 @@ class Strategy(Base):
 
     project = relationship("Project")
 
+
+
 class StrategyMonitoringLog(Base):
     """策略监控日志"""
     __tablename__ = 'strategy_monitoring_logs'
@@ -188,6 +190,7 @@ class StrategyMonitoringLog(Base):
     hit_count = Column(Integer, default=0)
     approval_rate = Column(Float, default=0.0)
     rule_stats = Column(JSON, default=list) # 详情统计 [{"id", "name", "hit_rate", ...}]
+    compare_result = Column(JSON, nullable=True)  # 策略对比快照 {baseline, experiment, diff}
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     project = relationship("Project")

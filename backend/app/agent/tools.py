@@ -842,3 +842,86 @@ class AgentToolkit:
         except Exception as e:
             logger.exception("call_ima_api 失败")
             return {"error": str(e)}
+
+    # ──────────────────────────────────────────────────────────
+    # Tool: run_strategy_compare
+    # ──────────────────────────────────────────────────────────
+    def run_strategy_compare(self, project_id: int, experiment_strategy_ids: list, n_samples: int = 8000) -> dict:
+        """策略对比模拟"""
+        try:
+            from app.api.modeling import strategy_compare, StrategyCompareRequest
+            req = StrategyCompareRequest(
+                experiment_strategy_ids=experiment_strategy_ids,
+                n_samples=n_samples
+            )
+            res = strategy_compare(project_id, req, self.db)
+            return res
+        except Exception as e:
+            logger.exception("run_strategy_compare 失败")
+            return {"error": str(e)}
+
+    # ──────────────────────────────────────────────────────────
+    # Tool: run_simulate_all_monitor
+    # ──────────────────────────────────────────────────────────
+    def run_simulate_all_monitor(self, project_id: int, experiment_strategy_ids: list = None) -> dict:
+        """执行一键全量模拟监控（带可选的 AB 实验）"""
+        try:
+            from app.api.modeling import simulate_all_monitor, SimulateAllRequest
+            req = SimulateAllRequest(experiment_strategy_ids=experiment_strategy_ids or [])
+            res = simulate_all_monitor(project_id, req, self.db)
+            return res
+        except Exception as e:
+            logger.exception("run_simulate_all_monitor 失败")
+            return {"error": str(e)}
+
+    # ──────────────────────────────────────────────────────────
+    # Tool: get_model_monitor_logs
+    # ──────────────────────────────────────────────────────────
+    def get_model_monitor_logs(self, project_id: int) -> dict:
+        """获取模型监控日志（PSI, 得分等）"""
+        try:
+            from app.models import MonitoringLog
+            logs = self.db.query(MonitoringLog).filter(
+                MonitoringLog.project_id == project_id
+            ).order_by(MonitoringLog.created_at.desc()).limit(10).all()
+            
+            return {
+                "total": len(logs),
+                "items": [{
+                    "id": l.id,
+                    "batch_name": l.batch_name,
+                    "psi": l.psi,
+                    "avg_score": l.avg_score,
+                    "sample_size": l.sample_size,
+                    "created_at": l.created_at.isoformat() if l.created_at else None
+                } for l in logs]
+            }
+        except Exception as e:
+            logger.exception("get_model_monitor_logs 失败")
+            return {"error": str(e)}
+
+    # ──────────────────────────────────────────────────────────
+    # Tool: get_strategy_monitor_logs
+    # ──────────────────────────────────────────────────────────
+    def get_strategy_monitor_logs(self, project_id: int) -> dict:
+        """获取策略监控日志（通过率，拦截量等）"""
+        try:
+            from app.api.modeling import get_strategy_monitoring_logs
+            logs = get_strategy_monitoring_logs(project_id, self.db)
+            
+            return {
+                "total": len(logs),
+                "items": [{
+                    "id": l.id,
+                    "batch_name": l.batch_name,
+                    "approval_rate": l.approval_rate,
+                    "hit_count": l.hit_count,
+                    "pass_count": l.pass_count,
+                    "total_count": l.total_count,
+                    "rule_stats_summary": [{"name": r["name"], "node_intercept_rate": r["node_intercept_rate"]} for r in (l.rule_stats or [])],
+                    "created_at": l.created_at.isoformat() if l.created_at else None
+                } for l in logs]
+            }
+        except Exception as e:
+            logger.exception("get_strategy_monitor_logs 失败")
+            return {"error": str(e)}

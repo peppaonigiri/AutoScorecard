@@ -8,6 +8,7 @@ import numpy as np # Added for simulate_monitor
 
 from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -258,9 +259,12 @@ def delete_model(project_id: int, result_id: int, db: Session = Depends(get_db))
 
 
 
+class SimulateAllRequest(BaseModel):
+    experiment_strategy_ids: List[int] = []
+
 @router.post('/projects/{project_id}/monitor/simulate_all')
-def simulate_all_monitor(project_id: int, db: Session = Depends(get_db)):
-    """一键执行模型与策略全量监控模拟"""
+def simulate_all_monitor(project_id: int, req: SimulateAllRequest, db: Session = Depends(get_db)):
+    """一键执行模型与策略全量监控模拟（可选附带 AB 测试）"""
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail='项目不存在')
@@ -304,15 +308,72 @@ def simulate_all_monitor(project_id: int, db: Session = Depends(get_db)):
             )
             db.add(m_log)
 
-    # 3. 执行策略监控 (针对当前已上线策略)
+    # 3. 执行策略监控 (针对当前已上线策略 + 实验策略)
     active_strategies = db.query(Strategy).filter(
         Strategy.project_id == project_id,
         Strategy.status == 'active'
     ).order_by(Strategy.priority.asc()).all()
-    
+
+    exp_strategies = []
+    if req.experiment_strategy_ids:
+        exp_strategies = db.query(Strategy).filter(
+            Strategy.id.in_(req.experiment_strategy_ids)
+        ).order_by(Strategy.priority.asc()).all()
+
+    # 预先进行模型分数丰富化
+    all_rules = []
+    if active_strategies:
+        for s in active_strategies:
+            all_rules.extend(s.rules)
+    if exp_strategies:
+        for s in exp_strategies:
+            all_rules.extend(s.rules)
+            
+    if all_rules:
+        from scorecard_core.strategy_engine import enrich_df_with_model_scores
+        sim_df = enrich_df_with_model_scores(sim_df, all_rules, db, ModelResult)
+
     if active_strategies:
         s_res = run_strategy_monitoring(sim_df, active_strategies, db, ModelResult)
         if s_res:
+            # 如果有实验策略，执行对比
+            compare_snapshot = None
+            if exp_strategies:
+                e_res = run_strategy_monitoring(sim_df, exp_strategies, db, ModelResult)
+                if e_res:
+                    delta_approval = round(e_res['approval_rate'] - s_res['approval_rate'], 4)
+                    delta_hit = e_res['hit_count'] - s_res['hit_count']
+                    delta_pass = e_res['pass_count'] - s_res['pass_count']
+                    
+                    direction_approval = "提升" if delta_approval > 0 else "降低"
+                    direction_hit = "增加" if delta_hit > 0 else "减少"
+                    summary = f"实验策略通过率{direction_approval} {abs(delta_approval)*100:.1f}%，拦截量{direction_hit} {abs(delta_hit)} 条"
+                    
+                    compare_snapshot = {
+                        "baseline": {
+                            "strategy_names": [s.name for s in active_strategies],
+                            "total_count": s_res['total_count'],
+                            "pass_count": s_res['pass_count'],
+                            "hit_count": s_res['hit_count'],
+                            "approval_rate": s_res['approval_rate'],
+                            "rule_stats": s_res['rule_stats']
+                        },
+                        "experiment": {
+                            "strategy_names": [s.name for s in exp_strategies],
+                            "total_count": e_res['total_count'],
+                            "pass_count": e_res['pass_count'],
+                            "hit_count": e_res['hit_count'],
+                            "approval_rate": e_res['approval_rate'],
+                            "rule_stats": e_res['rule_stats']
+                        },
+                        "diff": {
+                            "approval_rate_delta": delta_approval,
+                            "hit_count_delta": delta_hit,
+                            "pass_count_delta": delta_pass,
+                            "summary": summary
+                        }
+                    }
+
             s_log = StrategyMonitoringLog(
                 project_id=project_id,
                 batch_name=batch_name,
@@ -320,7 +381,8 @@ def simulate_all_monitor(project_id: int, db: Session = Depends(get_db)):
                 pass_count=s_res['pass_count'],
                 hit_count=s_res['hit_count'],
                 approval_rate=s_res['approval_rate'],
-                rule_stats=s_res['rule_stats']
+                rule_stats=s_res['rule_stats'],
+                compare_result=compare_snapshot
             )
             db.add(s_log)
 
@@ -334,6 +396,151 @@ def get_strategy_monitoring_logs(project_id: int, db: Session = Depends(get_db))
         StrategyMonitoringLog.project_id == project_id
     ).order_by(StrategyMonitoringLog.created_at.desc()).limit(20).all()
     return logs
+
+
+# ── 策略对比模拟 ─────────────────────────────────────────────────
+
+class StrategyCompareRequest(BaseModel):
+    experiment_strategy_ids: List[int]
+    n_samples: int = 8000
+
+@router.post('/projects/{project_id}/monitor/strategy_compare')
+def strategy_compare(project_id: int, req: StrategyCompareRequest, db: Session = Depends(get_db)):
+    """
+    策略对比模拟：在同一批模拟数据上分别跑当前策略(baseline)和实验策略(experiment)，
+    对比通过率、拦截率等指标差异。
+    """
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail='项目不存在')
+
+    # 1. 准备基础数据 & 模拟进件
+    ref_dataset = project.datasets[0] if project.datasets else None
+    if not ref_dataset:
+        raise HTTPException(status_code=400, detail='没有基础数据集可供模拟')
+
+    try:
+        df_ref = load_data(ref_dataset.file_path)
+        sim_df = simulate_business_intake(df_ref, n_samples=req.n_samples, drift_scale=0.05)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'模拟数据生成失败: {str(e)}')
+
+    # 2. Baseline: 当前 active 策略组
+    active_strategies = db.query(Strategy).filter(
+        Strategy.project_id == project_id,
+        Strategy.status == 'active'
+    ).order_by(Strategy.priority.asc()).all()
+
+    if not active_strategies:
+        raise HTTPException(status_code=400, detail='当前项目没有已上线的策略，无法作为基准组')
+
+    # 3. Experiment: 实验策略组
+    exp_strategies = db.query(Strategy).filter(
+        Strategy.id.in_(req.experiment_strategy_ids)
+    ).order_by(Strategy.priority.asc()).all()
+
+    if not exp_strategies:
+        raise HTTPException(status_code=400, detail='未找到指定的实验策略')
+
+    # 4. 数据预处理：模型分数丰富化（两组策略的规则都需要）
+    all_rules = []
+    for s in active_strategies:
+        all_rules.extend(s.rules)
+    for s in exp_strategies:
+        all_rules.extend(s.rules)
+
+    from scorecard_core.strategy_engine import enrich_df_with_model_scores
+    sim_df = enrich_df_with_model_scores(sim_df, all_rules, db, ModelResult)
+
+    # 5. 分别跑两套策略流
+    baseline_res = run_strategy_monitoring(sim_df, active_strategies, db, ModelResult)
+    experiment_res = run_strategy_monitoring(sim_df, exp_strategies, db, ModelResult)
+
+    if not baseline_res or not experiment_res:
+        raise HTTPException(status_code=500, detail='策略模拟执行失败')
+
+    # 6. 计算差异指标
+    delta_approval = round(experiment_res['approval_rate'] - baseline_res['approval_rate'], 4)
+    delta_hit = experiment_res['hit_count'] - baseline_res['hit_count']
+    delta_pass = experiment_res['pass_count'] - baseline_res['pass_count']
+
+    # 生成文字摘要
+    direction_approval = "提升" if delta_approval > 0 else "降低"
+    direction_hit = "增加" if delta_hit > 0 else "减少"
+    summary = f"实验策略通过率{direction_approval} {abs(delta_approval)*100:.1f}%，拦截量{direction_hit} {abs(delta_hit)} 条"
+
+    diff = {
+        "approval_rate_delta": delta_approval,
+        "hit_count_delta": delta_hit,
+        "pass_count_delta": delta_pass,
+        "summary": summary
+    }
+
+    # 7. 构造完整结果
+    baseline_data = {
+        "strategy_names": [s.name for s in active_strategies],
+        "total_count": baseline_res['total_count'],
+        "pass_count": baseline_res['pass_count'],
+        "hit_count": baseline_res['hit_count'],
+        "approval_rate": baseline_res['approval_rate'],
+        "rule_stats": baseline_res['rule_stats']
+    }
+    experiment_data = {
+        "strategy_names": [s.name for s in exp_strategies],
+        "total_count": experiment_res['total_count'],
+        "pass_count": experiment_res['pass_count'],
+        "hit_count": experiment_res['hit_count'],
+        "approval_rate": experiment_res['approval_rate'],
+        "rule_stats": experiment_res['rule_stats']
+    }
+
+    batch_name = f"策略对比_{datetime.now().strftime('%m%d_%H%M')}"
+
+    # 8. 保存对比记录到监控日志
+    compare_snapshot = {
+        "baseline": baseline_data,
+        "experiment": experiment_data,
+        "diff": diff
+    }
+    s_log = StrategyMonitoringLog(
+        project_id=project_id,
+        batch_name=batch_name,
+        total_count=baseline_res['total_count'],
+        pass_count=baseline_res['pass_count'],
+        hit_count=baseline_res['hit_count'],
+        approval_rate=baseline_res['approval_rate'],
+        rule_stats=baseline_res['rule_stats'],
+        compare_result=compare_snapshot
+    )
+    db.add(s_log)
+    db.commit()
+
+    return {
+        "batch_name": batch_name,
+        "baseline": baseline_data,
+        "experiment": experiment_data,
+        "diff": diff
+    }
+
+
+@router.get('/projects/{project_id}/monitor/strategy_compare/history')
+def get_strategy_compare_history(project_id: int, db: Session = Depends(get_db)):
+    """获取策略对比历史记录"""
+    logs = db.query(StrategyMonitoringLog).filter(
+        StrategyMonitoringLog.project_id == project_id,
+        StrategyMonitoringLog.compare_result.isnot(None)
+    ).order_by(StrategyMonitoringLog.created_at.desc()).limit(10).all()
+
+    return [
+        {
+            "id": log.id,
+            "batch_name": log.batch_name,
+            "compare_result": log.compare_result,
+            "created_at": log.created_at
+        }
+        for log in logs
+    ]
+
 
 @router.post('/projects/{project_id}/models/{model_id}/report')
 async def generate_model_report_api(project_id: int, model_id: int, db: Session = Depends(get_db)):

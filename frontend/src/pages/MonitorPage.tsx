@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Button, Row, Col, Statistic, Table, Empty, message, Tag, Space, Typography, Tabs } from 'antd';
+import { Card, Button, Row, Col, Statistic, Table, Empty, message, Tag, Space, Typography, Tabs, Select, Divider, Modal } from 'antd';
 const { Text } = Typography;
-import { PlayCircleOutlined, DashboardOutlined, SafetyCertificateOutlined, LineChartOutlined } from '@ant-design/icons';
+const { Option } = Select;
+import { PlayCircleOutlined, DashboardOutlined, SafetyCertificateOutlined, LineChartOutlined, ArrowUpOutlined, ArrowDownOutlined, SwapOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import api from '../services/api';
 import { useAppStore } from '../stores';
@@ -16,10 +17,17 @@ const MonitorPage: React.FC = () => {
     // 策略监控相关
     const [strategyLogs, setStrategyLogs] = useState<any[]>([]);
 
+    // 策略对比(AB实验)相关
+    const [allStrategies, setAllStrategies] = useState<any[]>([]);
+    const [selectedExperimentIds, setSelectedExperimentIds] = useState<number[]>([]);
+    const [isComparing, setIsComparing] = useState(false);
+    const [compareResult, setCompareResult] = useState<any>(null);
+
     useEffect(() => {
         if (currentProjectId) {
             fetchDeployments();
             fetchStrategyLogs();
+            fetchAllStrategies();
         }
     }, [currentProjectId]);
 
@@ -52,7 +60,9 @@ const MonitorPage: React.FC = () => {
     const handleRunSimulation = async () => {
         setSimulating(true);
         try {
-            await api.post(`/projects/${currentProjectId}/monitor/simulate_all`);
+            await api.post(`/projects/${currentProjectId}/monitor/simulate_all`, {
+                experiment_strategy_ids: selectedExperimentIds || []
+            });
             message.success('模型与策略全量监控任务完成');
             fetchLogs();
             fetchStrategyLogs();
@@ -67,8 +77,40 @@ const MonitorPage: React.FC = () => {
         try {
             const res: any = await api.get(`/projects/${currentProjectId}/strategy_monitor/logs`);
             setStrategyLogs(res || []);
+            if (res && res.length > 0 && res[0].compare_result) {
+                setCompareResult(res[0].compare_result);
+            }
         } catch (err) {
             console.error('获取策略监控日志失败', err);
+        }
+    };
+
+    const fetchAllStrategies = async () => {
+        try {
+            const res: any = await api.get(`/strategies/projects/${currentProjectId}`);
+            setAllStrategies(res || []);
+        } catch (err) {
+            console.error('获取策略列表失败', err);
+        }
+    };
+
+    const handleRunCompare = async () => {
+        if (!selectedExperimentIds || selectedExperimentIds.length === 0) {
+            message.warning('请选择实验策略');
+            return;
+        }
+        setIsComparing(true);
+        try {
+            const res: any = await api.post(`/projects/${currentProjectId}/monitor/strategy_compare`, {
+                experiment_strategy_ids: selectedExperimentIds
+            });
+            setCompareResult(res);
+            message.success('策略对比模拟完成');
+            fetchStrategyLogs(); // 刷新日志列表
+        } catch (err: any) {
+            message.error(err.response?.data?.detail || '策略对比失败');
+        } finally {
+            setIsComparing(false);
         }
     };
 
@@ -288,6 +330,62 @@ const MonitorPage: React.FC = () => {
                                     </Card>
                                 </Col>
                             </Row>
+
+                            {/* 策略对比模块 */}
+                            <Card title={<span><SwapOutlined /> 策略对比实验 (AB Test)</span>} style={{ marginBottom: 24, background: '#fafafa' }} className="card-shadow">
+                                <Row gutter={16} align="middle">
+                                    <Col span={18}>
+                                        <div style={{ marginBottom: 8, fontSize: 13, color: '#8c8c8c' }}>选择实验策略 (与当前已上线策略在同一批模拟数据上进行效果对比)</div>
+                                        <Select
+                                            mode="multiple"
+                                            placeholder="请选择要作为实验组的策略"
+                                            style={{ width: '100%' }}
+                                            onChange={(values) => setSelectedExperimentIds(values)}
+                                            options={allStrategies.map(s => ({ label: `${s.name} ${s.status === 'active' ? '(线上)' : ''}`, value: s.id }))}
+                                        />
+                                    </Col>
+                                    <Col span={6}>
+                                        <div style={{ marginBottom: 8 }}>&nbsp;</div>
+                                        <Button type="primary" onClick={handleRunCompare} loading={isComparing} block>
+                                            运行对比模拟
+                                        </Button>
+                                    </Col>
+                                </Row>
+
+                                {compareResult && (
+                                    <div style={{ marginTop: 24, padding: 16, background: '#fff', borderRadius: 8, border: '1px solid #f0f0f0' }}>
+                                        <Typography.Title level={5} style={{ marginTop: 0 }}>对比结果摘要</Typography.Title>
+                                        <Text strong>{compareResult.diff.summary}</Text>
+                                        <Divider style={{ margin: '12px 0' }} />
+                                        <Row gutter={24}>
+                                            <Col span={8}>
+                                                <Statistic
+                                                    title="通过率对比 (A → B)"
+                                                    value={compareResult.experiment.approval_rate * 100}
+                                                    precision={2}
+                                                    suffix="%"
+                                                    prefix={<span style={{ fontSize: 14, color: '#8c8c8c', marginRight: 8 }}>{(compareResult.baseline.approval_rate * 100).toFixed(2)}% →</span>}
+                                                    valueStyle={{ color: compareResult.diff.approval_rate_delta > 0 ? '#52c41a' : '#cf1322' }}
+                                                />
+                                            </Col>
+                                            <Col span={8}>
+                                                <Statistic
+                                                    title="拦截量对比 (A → B)"
+                                                    value={compareResult.experiment.hit_count}
+                                                    prefix={<span style={{ fontSize: 14, color: '#8c8c8c', marginRight: 8 }}>{compareResult.baseline.hit_count} →</span>}
+                                                    valueStyle={{ color: compareResult.diff.hit_count_delta > 0 ? '#52c41a' : '#cf1322' }}
+                                                />
+                                            </Col>
+                                            <Col span={8}>
+                                                <Statistic
+                                                    title="进件量"
+                                                    value={compareResult.baseline.total_count}
+                                                />
+                                            </Col>
+                                        </Row>
+                                    </div>
+                                )}
+                            </Card>
 
                             <Row gutter={24}>
                                 <Col span={12}>

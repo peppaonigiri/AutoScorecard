@@ -137,6 +137,7 @@ CREATE TABLE strategy_monitoring_logs (
     hit_count INTEGER DEFAULT 0,
     approval_rate FLOAT DEFAULT 0.0,
     rule_stats JSONB DEFAULT '[]',
+    compare_result JSONB DEFAULT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 

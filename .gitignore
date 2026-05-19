@@ -67,3 +67,6 @@ sql/
 .log
 
 config_bak.yaml
+config.yaml
+
+.claude/

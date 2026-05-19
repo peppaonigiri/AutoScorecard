@@ -421,6 +421,73 @@ PHASE2_TOOLS = [
                 "required": ["api_path", "body"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_strategy_compare",
+            "description": "策略对比模拟：在同一批模拟进件数据上，分别跑当前上线策略（基准组A）和指定的实验策略（实验组B），对比通过率、拦截率等指标差异。用于回答'如果换成策略X会怎样'这类问题。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {"type": "integer", "description": "项目 ID"},
+                    "experiment_strategy_ids": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "实验组策略 ID 列表（可从 list_all_strategies 获取）"
+                    },
+                    "n_samples": {"type": "integer", "description": "模拟样本量，默认 8000"}
+                },
+                "required": ["project_id", "experiment_strategy_ids"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_simulate_all_monitor",
+            "description": "执行一键全量模拟监控任务（触发后端 simulate_all 接口）。此工具将基于历史数据随机偏移生成一批进件数据，并执行当前上线模型及上线策略的打分与拦截，还可附带指定实验策略进行对比实验。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {"type": "integer", "description": "项目 ID"},
+                    "experiment_strategy_ids": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "可选的实验组策略 ID 列表，用于顺带进行 AB 实验对比"
+                    }
+                },
+                "required": ["project_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_model_monitor_logs",
+            "description": "获取模型监控日志列表。用于查看各批次模拟数据的模型 PSI（稳定性）、平均得分、得分分布等。PSI > 0.1 表示需要注意，> 0.25 表示模型已衰退危险。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {"type": "integer", "description": "项目 ID"}
+                },
+                "required": ["project_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_strategy_monitor_logs",
+            "description": "获取策略流监控日志列表。用于查看各批次模拟数据经过线上策略引擎后的表现，包括：整体通过率、拦截量、各独立规则的拦截率与通过率等。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {"type": "integer", "description": "项目 ID"}
+                },
+                "required": ["project_id"]
+            }
+        }
     }
 ]
 
