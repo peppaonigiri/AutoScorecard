@@ -327,3 +327,49 @@ class StrategyReorderRequest(BaseModel):
 
 class StrategyStatusUpdateRequest(BaseModel):
     status: str
+
+
+# ========== 策略置换分析（Swap In/Out）==========
+
+class SwapAnalysisRequest(BaseModel):
+    """策略置换分析请求"""
+    dataset_id: int
+    label_col: str = "label"            # 逾期标签列名
+
+    # ── 推荐方式：直接引用已保存的策略 ID ──────────────────────
+    old_strategy_id: Optional[int] = None   # 旧策略 ID（后端自动读取规则）
+    new_strategy_id: Optional[int] = None   # 新策略 ID（后端自动读取规则）
+
+    # ── 分数策略必填：模型 ID，触发后端实时打分 ─────────────────
+    model_result_id: Optional[int] = None   # 分数策略对应的模型 ID
+
+    # ── 兼容方式：手动指定单规则（旧策略）──────────────────────
+    old_col: Optional[str] = None
+    old_reject_op: Optional[str] = None
+    old_reject_val: Optional[Any] = None
+    # ── 兼容方式：手动指定单规则（新策略）──────────────────────
+    new_col: Optional[str] = None
+    new_reject_op: Optional[str] = None
+    new_reject_val: Optional[Any] = None
+    new_col_bins: Optional[List[float]] = None  # 分箱节点，None 则自动生成
+
+    # 复合策略规则配置
+    old_rules: Optional[List[Rule]] = None
+    old_combine_logic: Optional[str] = "and"
+    old_rule_type: Optional[str] = "reject"
+    new_rules: Optional[List[Rule]] = None
+    new_combine_logic: Optional[str] = "and"
+    new_rule_type: Optional[str] = "reject"
+
+
+
+class SwapAnalysisResponse(BaseModel):
+    """策略置换分析结果"""
+    decision_matrix: Dict[str, Any]
+    badrate_matrix: Dict[str, Any]
+    swap_in: Dict[str, Any]
+    swap_out: Dict[str, Any]
+    pass_rate_comparison: Dict[str, Any]
+    overall_badrate_comparison: Dict[str, Any]
+    rejection_inference_table: List[Dict[str, Any]]
+    summary_text: str

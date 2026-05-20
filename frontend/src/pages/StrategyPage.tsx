@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Form, Input, Select, Button, Space, Table, Typography, Statistic, Row, Col, Divider, message, Popconfirm, Modal, Descriptions, Switch, Badge, Alert, InputNumber, Progress } from 'antd';
-import { PlusOutlined, DeleteOutlined, AreaChartOutlined, SaveOutlined, EyeOutlined, HolderOutlined } from '@ant-design/icons';
-import { DndContext, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { Card, Form, Input, Select, Button, Space, Table, Typography, Statistic, Row, Col, Divider, message, Popconfirm, Modal, Descriptions, Switch, Badge, Alert, InputNumber, Progress, Tag, Tooltip } from 'antd';
+import { PlusOutlined, DeleteOutlined, AreaChartOutlined, SaveOutlined, EyeOutlined, HolderOutlined, SwapOutlined, ArrowRightOutlined, InfoCircleOutlined } from '@ant-design/icons';
+import { DndContext, PointerSensor, useSensor, useSensors, useDraggable, useDroppable } from '@dnd-kit/core';
 import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -76,6 +76,16 @@ const StrategyPage: React.FC = () => {
     const [miningProgress, setMiningProgress] = useState(0);
     const [recommendations, setRecommendations] = useState<any[]>([]);
     const [miningForm] = Form.useForm();
+
+    // ── Swap In/Out 置换分析状态 ───────────────────────────────────
+    const [swapOldStrategy, setSwapOldStrategy] = useState<any>(null);  // 拖入「旧策略」槽的策略
+    const [swapNewStrategy, setSwapNewStrategy] = useState<any>(null);  // 拖入「新策略」槽的策略
+    const [swapDatasetId, setSwapDatasetId] = useState<number | null>(null);
+    const [swapLabelCol, setSwapLabelCol] = useState<string>('label');
+    const [swapLoading, setSwapLoading] = useState(false);
+    const [swapResult, setSwapResult] = useState<any>(null);
+    const [swapInferenceVisible, setSwapInferenceVisible] = useState(false);
+    const [isDraggingSwap, setIsDraggingSwap] = useState(false);
 
     useEffect(() => {
         if (currentProjectId) {
@@ -218,6 +228,15 @@ const StrategyPage: React.FC = () => {
             key: 'sort',
             width: 40,
         },
+        {
+            key: 'swapDrag',
+            width: 32,
+            render: (_: any, _record: any) => (
+                <Tooltip title="拖拽到下方置换分析槽位">
+                    <SwapOutlined style={{ color: '#1890ff', cursor: 'grab' }} />
+                </Tooltip>
+            )
+        },
         { title: '策略名称', dataIndex: 'name', key: 'name' },
         {
             title: '状态',
@@ -356,6 +375,54 @@ const StrategyPage: React.FC = () => {
             },
         }),
     );
+
+    // ── Swap 分析拖拽逻辑 ─────────────────────────────────────────
+    const swapSensors = useSensors(
+        useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+    );
+
+    const onSwapDragStart = () => setIsDraggingSwap(true);
+
+    const onSwapDragEnd = ({ active, over }: any) => {
+        setIsDraggingSwap(false);
+        if (!over) return;
+        const draggedStrategy = savedStrategies.find((s: any) => s.id === active.id);
+        if (!draggedStrategy) return;
+        if (over.id === 'slot-old') setSwapOldStrategy(draggedStrategy);
+        if (over.id === 'slot-new') setSwapNewStrategy(draggedStrategy);
+    };
+
+    const runSwapAnalysis = async () => {
+        if (!swapOldStrategy || !swapNewStrategy) {
+            message.warning('请先将旧策略和新策略分别拖入对应槽位');
+            return;
+        }
+        if (!swapDatasetId) {
+            message.warning('请选择数据集');
+            return;
+        }
+
+        setSwapLoading(true);
+        setSwapResult(null);
+        try {
+            const res = await api.post('/strategies/swap-analysis', {
+                dataset_id: swapDatasetId,
+                label_col: swapLabelCol,
+                old_rules: swapOldStrategy.rules,
+                old_combine_logic: swapOldStrategy.combine_logic || 'and',
+                old_rule_type: swapOldStrategy.rule_type || 'reject',
+                new_rules: swapNewStrategy.rules,
+                new_combine_logic: swapNewStrategy.combine_logic || 'and',
+                new_rule_type: swapNewStrategy.rule_type || 'reject',
+            });
+            setSwapResult(res);
+            message.success('置换分析完成');
+        } catch (err: any) {
+            message.error(err.response?.data?.detail || '分析失败');
+        } finally {
+            setSwapLoading(false);
+        }
+    };
 
     return (
         <div style={{ padding: '24px' }}>
@@ -561,6 +628,110 @@ const StrategyPage: React.FC = () => {
                     </Card>
                 </Col>
             </Row>
+
+            {/* ── Swap In/Out 置换分析区域 ──────────────────────────────── */}
+            <DndContext
+                sensors={swapSensors}
+                onDragStart={onSwapDragStart}
+                onDragEnd={onSwapDragEnd}
+            >
+                <Card
+                    title={<span><SwapOutlined /> 策略置换分析（Swap In/Out）</span>}
+                    bordered={false}
+                    className="card-shadow"
+                    style={{ marginTop: 24 }}
+                    extra={
+                        <Alert
+                            message="从上方列表把旧策略拖到「旧策略槽」，新策略拖到「新策略槽」，即可分析置换效果"
+                            type="info"
+                            showIcon
+                            style={{ padding: '4px 12px' }}
+                        />
+                    }
+                >
+                    {/* ─ 可拖拽策略列表（用于置换分析）─ */}
+                    <SortableContext items={savedStrategies.map((i: any) => i.id)} strategy={verticalListSortingStrategy}>
+                        {/* 把 savedStrategies 渲染成可拖拽行 */}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+                            {savedStrategies.map((s: any) => (
+                                <SwapDraggableTag key={s.id} strategy={s} />
+                            ))}
+                        </div>
+                    </SortableContext>
+
+                    {/* ─ 槽位区 ─ */}
+                    <Row gutter={16} style={{ marginBottom: 16 }}>
+                        <Col span={11}>
+                            <SwapDropSlot
+                                id="slot-old"
+                                label="旧策略槽"
+                                strategy={swapOldStrategy}
+                                color="#ff4d4f"
+                                isDragging={isDraggingSwap}
+                                onClear={() => setSwapOldStrategy(null)}
+                            />
+                        </Col>
+                        <Col span={2} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <ArrowRightOutlined style={{ fontSize: 24, color: '#8c8c8c' }} />
+                        </Col>
+                        <Col span={11}>
+                            <SwapDropSlot
+                                id="slot-new"
+                                label="新策略槽"
+                                strategy={swapNewStrategy}
+                                color="#52c41a"
+                                isDragging={isDraggingSwap}
+                                onClear={() => setSwapNewStrategy(null)}
+                            />
+                        </Col>
+                    </Row>
+
+                    {/* ─ 分析配置 ─ */}
+                    <Row gutter={16} style={{ marginBottom: 16 }}>
+                        <Col span={8}>
+                            <span style={{ marginRight: 8 }}>数据集：</span>
+                            <Select
+                                style={{ width: 200 }}
+                                placeholder="选择数据集"
+                                value={swapDatasetId}
+                                onChange={(v) => setSwapDatasetId(v)}
+                            >
+                                {datasets.map((ds: any) => (
+                                    <Select.Option key={ds.id} value={ds.id}>{ds.name}</Select.Option>
+                                ))}
+                            </Select>
+                        </Col>
+                        <Col span={8}>
+                            <span style={{ marginRight: 8 }}>逾期标签列：</span>
+                            <Input
+                                style={{ width: 160 }}
+                                value={swapLabelCol}
+                                onChange={e => setSwapLabelCol(e.target.value)}
+                                placeholder="标签列名，如 label"
+                            />
+                        </Col>
+                        <Col span={8}>
+                            <Button
+                                type="primary"
+                                icon={<SwapOutlined />}
+                                loading={swapLoading}
+                                onClick={runSwapAnalysis}
+                            >
+                                运行置换分析
+                            </Button>
+                        </Col>
+                    </Row>
+
+                    {/* ─ 分析结果 ─ */}
+                    {swapResult && (
+                        <SwapResultPanel
+                            result={swapResult}
+                            inferenceVisible={swapInferenceVisible}
+                            onToggleInference={() => setSwapInferenceVisible(v => !v)}
+                        />
+                    )}
+                </Card>
+            </DndContext>
 
             <Modal
                 title="保存策略方案"
@@ -784,6 +955,255 @@ const StrategyPage: React.FC = () => {
                     />
                 )}
             </Modal>
+        </div>
+    );
+};
+
+// ══════════════════════════════════════════════════════════════
+// 子组件：SwapDraggableTag — 策略标签（可拖拽到槽位）
+// ══════════════════════════════════════════════════════════════
+const SwapDraggableTag: React.FC<{ strategy: any }> = ({ strategy }) => {
+    const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: strategy.id });
+    return (
+        <div
+            ref={setNodeRef}
+            {...listeners}
+            {...attributes}
+            style={{ opacity: isDragging ? 0.4 : 1, cursor: 'grab' }}
+        >
+            <Tag
+                color={strategy.status === 'active' ? 'blue' : 'default'}
+                style={{ userSelect: 'none', padding: '4px 10px', fontSize: 13 }}
+                icon={<HolderOutlined />}
+            >
+                {strategy.name}
+            </Tag>
+        </div>
+    );
+};
+
+// ══════════════════════════════════════════════════════════════
+// 子组件：SwapDropSlot — 策略拖拽落点槽位
+// ══════════════════════════════════════════════════════════════
+const SwapDropSlot: React.FC<{
+    id: string;
+    label: string;
+    strategy: any;
+    color: string;
+    isDragging: boolean;
+    onClear: () => void;
+}> = ({ id, label, strategy, color, isDragging, onClear }) => {
+    const { isOver, setNodeRef } = useDroppable({ id });
+
+    const borderColor = isOver ? color : (strategy ? color : '#d9d9d9');
+    const bgColor = isOver ? `${color}15` : (strategy ? `${color}08` : '#fafafa');
+
+    return (
+        <div
+            ref={setNodeRef}
+            style={{
+                border: `2px dashed ${borderColor}`,
+                borderRadius: 8,
+                background: bgColor,
+                minHeight: 80,
+                padding: 16,
+                transition: 'all 0.2s',
+                position: 'relative',
+            }}
+        >
+            <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 8 }}>
+                <span style={{ color, fontWeight: 600 }}>◉ {label}</span>
+            </div>
+            {strategy ? (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div>
+                        <Tag color={color} style={{ fontSize: 13, padding: '2px 10px' }}>
+                            {strategy.name}
+                        </Tag>
+                        {strategy.rules?.[0] && (
+                            <Text type="secondary" style={{ fontSize: 12 }}>
+                                {strategy.rules[0].field} {strategy.rules[0].op} {String(strategy.rules[0].val)}
+                            </Text>
+                        )}
+                    </div>
+                    <Button size="small" type="text" danger onClick={onClear}>✕</Button>
+                </div>
+            ) : (
+                <div style={{ textAlign: 'center', color: '#bbb', fontSize: 13 }}>
+                    {isDragging ? '松开放入' : '将策略拖拽到此处'}
+                </div>
+            )}
+        </div>
+    );
+};
+
+// ══════════════════════════════════════════════════════════════
+// 子组件：SwapResultPanel — 置换分析结果展示
+// ══════════════════════════════════════════════════════════════
+const SwapResultPanel: React.FC<{
+    result: any;
+    inferenceVisible: boolean;
+    onToggleInference: () => void;
+}> = ({ result, inferenceVisible, onToggleInference }) => {
+    const { decision_matrix, badrate_matrix, swap_in, swap_out, pass_rate_comparison, overall_badrate_comparison, rejection_inference_table, summary_text } = result;
+
+    const pct = (v: number | null | undefined) => v != null ? `${(v * 100).toFixed(2)}%` : '-';
+    const num = (v: number | null | undefined) => v != null ? v.toLocaleString() : '-';
+
+    // 2×2 矩阵颜色
+    const cellStyle = (bg: string): React.CSSProperties => ({
+        background: bg, borderRadius: 6, padding: '12px 16px', textAlign: 'center' as const
+    });
+
+    const inferenceColumns = [
+        { title: '分箱区间', dataIndex: 'bin', key: 'bin' },
+        { title: '通过样本数', dataIndex: 'pass_count', key: 'pass_count' },
+        { title: '坏客户数', dataIndex: 'pass_bad', key: 'pass_bad' },
+        { title: '坏率(通过样本)', dataIndex: 'badrate', key: 'badrate', render: (v: number) => pct(v) },
+        { title: 'Lift', dataIndex: 'lift', key: 'lift', render: (v: number) => v?.toFixed(2) },
+        { title: '置入样本数', dataIndex: 'reject_cnt', key: 'reject_cnt' },
+        { title: '坏客户数', dataIndex: 'est_bad_cnt', key: 'est_bad_cnt', render: (v: number) => v?.toFixed(1) },
+    ];
+
+    return (
+        <div style={{ marginTop: 16 }}>
+            <Divider>置换分析结果</Divider>
+
+            {/* 4格决策矩阵 */}
+            <div style={{ marginBottom: 20 }}>
+                <Text strong>2×2 决策矩阵（人数）</Text>
+                <div style={{ fontSize: 11, color: '#8c8c8c', marginTop: 2, marginBottom: 12 }}>
+                    基于历史数据分析，置入/置出客群均有真实贷后标签
+                </div>
+                <Row gutter={8}>
+                    <Col span={12}>
+                        <div style={cellStyle('#e6f4ff')}>
+                            <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>双通（旧通新通）</div>
+                            <div style={{ fontSize: 20, fontWeight: 700, color: '#1890ff' }}>{num(decision_matrix.双通_n)}</div>
+                            <div style={{ fontSize: 11, color: '#999' }}>坏率：{pct(badrate_matrix.双通_badrate)}</div>
+                        </div>
+                    </Col>
+                    <Col span={12}>
+                        <div style={cellStyle('#fff7e6')}>
+                            <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>置出 Swap Out（旧通新拒）</div>
+                            <div style={{ fontSize: 20, fontWeight: 700, color: '#fa8c16' }}>{num(decision_matrix.置出_n)}</div>
+                            <div style={{ fontSize: 11, color: '#999' }}>真实坏率：{pct(badrate_matrix.置出_badrate)}</div>
+                        </div>
+                    </Col>
+                </Row>
+                <Row gutter={8} style={{ marginTop: 8 }}>
+                    <Col span={12}>
+                        <div style={cellStyle('#f6ffed')}>
+                            <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>置入 Swap In（旧拒新通）</div>
+                            <div style={{ fontSize: 20, fontWeight: 700, color: '#52c41a' }}>{num(decision_matrix.置入_n)}</div>
+                            <div style={{ fontSize: 11, color: '#999' }}>坏率：{pct(badrate_matrix.置入_badrate_inferred)}</div>
+                        </div>
+                    </Col>
+                    <Col span={12}>
+                        <div style={cellStyle('#f5f5f5')}>
+                            <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>双拒（旧拒新拒）</div>
+                            <div style={{ fontSize: 20, fontWeight: 700, color: '#8c8c8c' }}>{num(decision_matrix.双拒_n)}</div>
+                        </div>
+                    </Col>
+                </Row>
+            </div>
+
+            {/* 置入/置出关键指标 */}
+            <Row gutter={16} style={{ marginBottom: 16 }}>
+                <Col span={6}>
+                    <Statistic
+                        title="置出坏率（真实）"
+                        value={swap_out.real_badrate * 100}
+                        precision={2}
+                        suffix="%"
+                        valueStyle={{ color: swap_out.real_badrate > 0.1 ? '#cf1322' : '#3f8600' }}
+                    />
+                </Col>
+                <Col span={6}>
+                    <Statistic
+                        title="置入坏率"
+                        value={swap_in.est_badrate * 100}
+                        precision={2}
+                        suffix="%"
+                        valueStyle={{ color: '#52c41a' }}
+                    />
+                </Col>
+                <Col span={6}>
+                    <Statistic
+                        title="旧策略通过率"
+                        value={pass_rate_comparison.old_pass_rate * 100}
+                        precision={2}
+                        suffix="%"
+                    />
+                </Col>
+                <Col span={6}>
+                    <Statistic
+                        title="新策略通过率"
+                        value={pass_rate_comparison.new_pass_rate * 100}
+                        precision={2}
+                        suffix="%"
+                        valueStyle={{ color: pass_rate_comparison.delta > 0 ? '#3f8600' : '#cf1322' }}
+                    />
+                </Col>
+            </Row>
+
+            {/* 逾期率对比 */}
+            <Row gutter={16} style={{ marginBottom: 16 }}>
+                <Col span={6}>
+                    <Statistic
+                        title="旧策略通过样本坏率"
+                        value={overall_badrate_comparison.old_badrate * 100}
+                        precision={2}
+                        suffix="%"
+                    />
+                </Col>
+                <Col span={6}>
+                    <Statistic
+                        title="新策略通过样本坏率"
+                        value={overall_badrate_comparison.new_badrate * 100}
+                        precision={2}
+                        suffix="%"
+                        valueStyle={{ color: overall_badrate_comparison.delta < 0 ? '#3f8600' : '#cf1322' }}
+                    />
+                </Col>
+                <Col span={12}>
+                    <Alert
+                        type={overall_badrate_comparison.delta < 0 ? 'success' : 'warning'}
+                        message={`坏率变化：${overall_badrate_comparison.delta > 0 ? '+' : ''}${(overall_badrate_comparison.delta * 100).toFixed(2)}%`}
+                        showIcon
+                    />
+                </Col>
+            </Row>
+
+            {/* 综合结论 */}
+            <Alert
+                message="置换分析综合结论"
+                description={summary_text}
+                type="info"
+                showIcon
+                style={{ marginBottom: 12 }}
+            />
+
+            {/* 拒绝推断明细（折叠） */}
+            <Button
+                size="small"
+                type="link"
+                onClick={onToggleInference}
+                icon={<InfoCircleOutlined />}
+            >
+                {inferenceVisible ? '收起' : '查看'}拒绝推断分箱明细
+            </Button>
+            {inferenceVisible && (
+                <Table
+                    dataSource={rejection_inference_table}
+                    columns={inferenceColumns}
+                    rowKey="bin"
+                    size="small"
+                    pagination={false}
+                    bordered
+                    style={{ marginTop: 8 }}
+                />
+            )}
         </div>
     );
 };

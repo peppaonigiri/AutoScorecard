@@ -44,6 +44,42 @@ PHASE1_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "handle_missing_values",
+            "description": (
+                "对数据集的数值列进行缺失值填充，生成一个新的已填充数据集快照，并返回新的 dataset_id。"
+                "【调用时机】：在 get_data_overview 发现缺失率较高（如 > 5%）时，建议在 run_iv_report 之前调用。"
+                "填充后必须使用返回的 new_dataset_id 替换原 dataset_id 进行后续建模操作。"
+                "常用填充值：-999（表示缺失标记，适合树模型）、0（适合已知零值场景）。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "integer",
+                        "description": "建模项目 ID"
+                    },
+                    "dataset_id": {
+                        "type": "integer",
+                        "description": "待填充的数据集 ID"
+                    },
+                    "fill_value": {
+                        "type": "number",
+                        "description": "缺失值填充数值，默认 -999。树模型推荐 -999，线性模型可考虑均值（需手动指定）"
+                    },
+                    "exclude_cols": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "不参与填充的列名（如标签列、ID 列）。默认 []"
+                    }
+                },
+                "required": ["project_id", "dataset_id"]
+            }
+        }
+    },
+
+    {
+        "type": "function",
+        "function": {
             "name": "run_iv_report",
             "description": (
                 "计算指定数据集所有特征的 IV（信息价值）和 PSI（稳定性指数）。"
@@ -264,7 +300,11 @@ PHASE2_TOOLS = [
         "type": "function",
         "function": {
             "name": "analyze_strategy",
-            "description": "进行策略规则的单变量或多变量分析与测试，在实际部署前评估规则的拦截率、通过率、坏率等表现。",
+            "description": (
+                "进行策略规则的单变量或多变量分析与测试，在实际部署前评估规则的拦截率、通过率、坏率等表现。"
+                "【重要】rules 列表中每个元素必须是单条规则（如 'age < 20'），不要将多条规则用 and/or 拼成一个字符串。"
+                "多条规则之间的逻辑关系通过 combine_logic 参数控制。"
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -273,9 +313,9 @@ PHASE2_TOOLS = [
                     "rules": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "需要测试的规则列表，如 ['age < 20', 'income > 5000']"
+                        "description": "规则列表，每条为单一条件，如 ['FT2_0697_m12_to_m24 <= -995.5873', 'FT2_0656_m24 <= -227.6464']"
                     },
-                    "combine_logic": {"type": "string", "enum": ["and", "or"], "default": "and"},
+                    "combine_logic": {"type": "string", "enum": ["and", "or"], "default": "and", "description": "多条规则的合并逻辑，默认 and"},
                     "rule_type": {"type": "string", "enum": ["reject", "pass", "review"], "default": "reject"},
                     "model_result_id": {"type": "integer", "description": "可选。如果测试分数策略（如 score < 450），需传入对应模型 ID"}
                 },
@@ -302,16 +342,26 @@ PHASE2_TOOLS = [
         "type": "function",
         "function": {
             "name": "deploy_strategy",
-            "description": "将挖掘出的规则或分数阈值合并为一个风控策略并上线。支持分数策略：若 field 为 'score' 且传入了 model_result_id，系统会自动关联该模型的得分。",
+            "description": (
+                "将挖掘出的规则或分数阈值合并为一个风控策略并上线。"
+                "【重要】rules 列表中每个元素必须是单条规则（如 'age > 30'），不要将多条规则用 and/or 拼成一个字符串。"
+                "多条规则之间的逻辑关系通过 combine_logic 参数控制（默认 and）。"
+                "支持分数策略：若 field 为 'score' 且传入了 model_result_id，系统会自动关联该模型的得分。"
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "project_id": {"type": "integer"},
                     "name": {"type": "string", "description": "策略名称"},
                     "rules": {
-                        "type": "array", 
+                        "type": "array",
                         "items": {"type": "string"},
-                        "description": "规则列表，如 ['age > 30', 'score < 450']"
+                        "description": "规则列表，每条为单一条件，如 ['FT2_0697_m12_to_m24 <= -995.5873', 'FT2_0656_m24 <= -227.6464']"
+                    },
+                    "combine_logic": {
+                        "type": "string",
+                        "enum": ["and", "or"],
+                        "description": "多条规则的合并逻辑，默认 and（所有条件同时满足才拦截）"
                     },
                     "model_result_id": {"type": "integer", "description": "可选。如果要制定分数策略，请提供对应的模型 ID"}
                 },
@@ -486,6 +536,89 @@ PHASE2_TOOLS = [
                     "project_id": {"type": "integer", "description": "项目 ID"}
                 },
                 "required": ["project_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_swap_analysis",
+            "description": (
+                "策略置换分析（Swap In/Out）：对比新旧两套策略的效果差异。\n"
+                "置入（Swap In）：旧策略拒绝+新策略通过的客群，即新策略捞回的客群。\n"
+                "置出（Swap Out）：旧策略通过+新策略拒绝的客群，即新策略新增拦截的客群。\n"
+                "输出 2x2 决策矩阵、置入客群估算坏率（拒绝推断法）、置出客群真实坏率、通过率和逾期率对比。\n"
+                "【分数策略用法】：若新/旧策略是基于模型分数的（如'拦截538分以下'），\n"
+                "  需将 new_col 设为 '_model_result_{model_result_id}'（如 '_model_result_26'），\n"
+                "  同时传入 model_result_id，后端会自动对数据集进行实时打分并填充该列。\n"
+                "【推荐用法】：若已知策略 ID，优先传入 old_strategy_id / new_strategy_id，\n"
+                "  后端会自动从策略库读取 rules（含 model_result_id 关联），无需手动指定规则字段。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {"type": "integer", "description": "项目 ID"},
+                    "dataset_id": {"type": "integer", "description": "数据集 ID，需同时包含新旧策略字段和逾期标签"},
+                    "label_col": {"type": "string", "description": "逾期标签列名，旧策略拒绝客户该列为 NaN"},
+                    "old_strategy_id": {
+                        "type": "integer",
+                        "description": "【推荐】旧策略的 strategy_id（从 list_project_strategies 获取）。传入后无需再指定 old_col/old_reject_op/old_reject_val"
+                    },
+                    "new_strategy_id": {
+                        "type": "integer",
+                        "description": "【推荐】新策略的 strategy_id（从 list_project_strategies 获取）。传入后无需再指定 new_col/new_reject_op/new_reject_val"
+                    },
+                    "model_result_id": {
+                        "type": "integer",
+                        "description": "【分数策略必填】当新策略或旧策略基于模型分数时（field='score' 或 field='_model_result_X'），传入对应的模型 ID。后端将自动对数据集打分并填充分数列。"
+                    },
+                    "old_col": {"type": "string", "description": "旧策略字段名。若旧策略为分数策略，填 '_model_result_{model_result_id}'，如 '_model_result_26'"},
+                    "old_reject_op": {"type": "string", "enum": [">=", ">", "<=", "<", "==", "in"], "description": "旧策略拒绝操作符"},
+                    "old_reject_val": {"description": "旧策略拒绝阈值，数值或逗号分隔字符串如 'D,E'"},
+                    "new_col": {"type": "string", "description": "新策略字段名。若新策略为分数策略，填 '_model_result_{model_result_id}'，如 '_model_result_26'"},
+                    "new_reject_op": {"type": "string", "enum": [">=", ">", "<=", "<", "==", "in"], "description": "新策略拒绝操作符"},
+                    "new_reject_val": {"description": "新策略拒绝阈值（如 538）"},
+                    "new_col_bins": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "新策略分箱节点，用于拒绝推断法估算置入客群坏率。不传则自动等频分箱"
+                    }
+                },
+                "required": ["project_id", "dataset_id", "label_col"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_project_strategies",
+            "description": "查看项目下历史保存的所有策略方案（包括草稿状态和已上线状态、优先级、规则列表以及历史预估指标等）。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {"type": "integer", "description": "项目 ID"}
+                },
+                "required": ["project_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_strategy_status",
+            "description": "操作特定策略的上线或下架。上线状态设为 'active'，下架/草稿状态设为 'draft'。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {"type": "integer", "description": "项目 ID"},
+                    "strategy_id": {"type": "integer", "description": "策略 ID"},
+                    "status": {
+                        "type": "string",
+                        "enum": ["active", "draft"],
+                        "description": "目标状态：'active' 表示上线，'draft' 表示下架（重置为草稿）"
+                    }
+                },
+                "required": ["project_id", "strategy_id", "status"]
             }
         }
     }

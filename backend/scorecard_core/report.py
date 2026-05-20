@@ -14,7 +14,31 @@ except ImportError:
     # 兼容性导入，如果结构不同可能需要调整
     pass
 
-def generate_model_report(data_end, model, keep_lst, save_dir, model_id, res_data=None, res_month=None, pdo_df=None, if_weight=True, label_col='label', target_col='target'):
+def _score_ks_bucket(score_series: pd.Series, label_series: pd.Series, bucket: int = 10) -> pd.DataFrame:
+    """基于分数（低分=高风险）计算 KS 分箱表，升序排列（低分在前）"""
+    df = pd.DataFrame({'score': score_series.values, 'label': label_series.values}).dropna()
+    total = len(df)
+    if total == 0:
+        return pd.DataFrame(columns=['min', 'max', 'bad_rate', 'total_prop', 'cum_bad_rate', 'cum_total_prop'])
+    try:
+        df['bucket'] = pd.qcut(df['score'], q=bucket, duplicates='drop')
+    except Exception:
+        df['bucket'] = pd.cut(df['score'], bins=bucket, duplicates='drop')
+    agg = df.groupby('bucket', observed=True)['label'].agg(['count', 'sum']).reset_index()
+    agg.columns = ['bucket', 'count', 'bad']
+    agg = agg.sort_values('bucket').reset_index(drop=True)
+    agg['min'] = agg['bucket'].apply(lambda x: x.left)
+    agg['max'] = agg['bucket'].apply(lambda x: x.right)
+    agg['bad_rate'] = agg['bad'] / agg['count']
+    agg['total_prop'] = agg['count'] / total
+    agg['cum_total_prop'] = agg['total_prop'].cumsum()
+    agg['cum_bad'] = agg['bad'].cumsum()
+    agg['cum_count'] = agg['count'].cumsum()
+    agg['cum_bad_rate'] = agg['cum_bad'] / agg['cum_count']
+    return agg[['min', 'max', 'bad_rate', 'total_prop', 'cum_bad_rate', 'cum_total_prop']]
+
+
+def generate_model_report(data_end, model, keep_lst, save_dir, model_id, res_data=None, res_month=None, pdo_df=None, if_weight=True, label_col='label', target_col='target', score_config=None):
     """
     基于用户提供的逻辑生成模型报告
     :param data_end: pd.DataFrame, 包含 'proba', label_col, target_col, 'month_time', 'weight' 等字段
@@ -105,17 +129,19 @@ def generate_model_report(data_end, model, keep_lst, save_dir, model_id, res_dat
     if not if_weight:
         info_df.drop(columns=['badrate_weight'], axis=1, inplace=True, errors='ignore')
 
-    # 3. Lift 表 (lift_df)
+    # 3. Lift 表 (lift_df) — 基于分数分箱（与策略引擎一致）
     tag_list = ['train', 'valid', 'oot']
     tag_list_str = tag_list
     df_list_lift = []
+    use_score = 'score' in data_end.columns
     for tag_val in tag_list:
-        # isin 需要传入列表
         temp_df_sub = data_end[data_end[target_col].isin([tag_val])]
         if not temp_df_sub.empty:
-            score_ks = toad.metrics.KS_bucket(temp_df_sub['proba'], temp_df_sub[label_col], bucket=10)
-            # 保留更多核心指标用于策略制定 (注意匹配 toad 的列名: total_prop, cum_total_prop)
-            lift_df_diff = score_ks[['min', 'max', 'bad_rate', 'total_prop', 'cum_bad_rate', 'cum_total_prop']]
+            if use_score:
+                lift_df_diff = _score_ks_bucket(temp_df_sub['score'], temp_df_sub[label_col], bucket=10)
+            else:
+                score_ks = toad.metrics.KS_bucket(temp_df_sub['proba'], temp_df_sub[label_col], bucket=10)
+                lift_df_diff = score_ks[['min', 'max', 'bad_rate', 'total_prop', 'cum_bad_rate', 'cum_total_prop']]
             df_list_lift.append(lift_df_diff)
         else:
             df_list_lift.append(pd.DataFrame())
@@ -363,11 +389,23 @@ def run_report_task(db, task_id, progress_callback, project_id, model_result_id,
     model = joblib.load(model_result.model_path)
     
     progress_callback(30, {"message": "正在计算打分与概率..."})
-    
+
     # 计算概率
-    # 提取特征
     features = model_result.feature_list
     data_end['proba'] = model.predict_proba(data_end[features])[:, 1]
+
+    # 计算分数（与策略引擎保持一致）
+    sc = model_result.score_config or {}
+    try:
+        from scorecard_core.scoring import proba2score
+        data_end['score'] = proba2score(
+            data_end['proba'].values,
+            pdo=sc.get('pdo', 20),
+            base_score=sc.get('base_score', 600),
+            base_odds=sc.get('base_odds', 50),
+        )
+    except Exception:
+        pass  # 打分失败时降级为概率分箱
     
     # 如果有权重列
     if 'weight' not in data_end.columns:

@@ -4,18 +4,17 @@ import {
     Select, InputNumber, Tooltip, Table
 } from 'antd';
 import {
-    RobotOutlined, UserOutlined,
     CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined,
-    FileExcelOutlined, TrophyOutlined, ClearOutlined,
+    FileExcelOutlined, ClearOutlined,
     SettingOutlined, SendOutlined, InfoCircleOutlined,
-    TableOutlined
+    TableOutlined, RobotOutlined
 } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useAppStore } from '../stores';
 import { useUserStore } from '../stores/userStore';
 
-const { Text } = Typography;
+const { Text, Title, Paragraph } = Typography;
 const { TextArea } = Input;
 const { Option } = Select;
 
@@ -33,29 +32,32 @@ type ChatEntry = { type: 'user'; content: string } | { type: 'assistant'; turn: 
 
 // ── 工具名称映射 ───────────────────────────────────────────────────────────────
 const TOOL_LABEL: Record<string, string> = {
-    get_data_overview:    '数据概览 & 描述性统计',
-    run_iv_report:        'IV / PSI 分析',
-    filter_features:      'L2 变量筛选',
-    start_training:       '启动 Optuna 建模',
+    handle_missing_values: '缺失值填充',
+    get_data_overview: '数据概览 & 描述性统计',
+    run_iv_report: 'IV / PSI 分析',
+    filter_features: 'L2 变量筛选',
+    start_training: '启动 Optuna 建模',
     poll_task_until_done: '等待任务完成',
-    generate_report:      '生成模型报告',
-    get_model_metrics:    '获取最终指标',
+    generate_report: '生成模型报告',
+    get_model_metrics: '获取最终指标',
     auto_strategy_mining: '自动化策略挖掘',
-    deploy_model:         '模型上线',
-    deploy_strategy:      '策略上线',
-    strategy_backtest:    '策略回溯与监控',
-    list_trained_models:  '查看已训练模型',
+    deploy_model: '模型上线',
+    deploy_strategy: '策略上线',
+    strategy_backtest: '策略回溯与监控',
+    list_trained_models: '查看已训练模型',
     get_score_cutoff_table: '查看分数切分表',
     get_model_report: '查看模型详细报告',
     list_active_strategies: '查看已上线策略',
+    list_project_strategies: '获取历史策略列表',
+    update_strategy_status: '更新策略状态',
 };
 
 // ── 数据概览渲染 ───────────────────────────────────────────────────────────────
 const DataOverviewResult: React.FC<{ r: any }> = ({ r }) => {
-    const cols     = r.columns || [];
-    const ts       = r.type_summary || {};
-    const ms       = r.missing_summary || {};
-    const no       = r.numeric_overall || {};
+    const cols = r.columns || [];
+    const ts = r.type_summary || {};
+    const ms = r.missing_summary || {};
+    const no = r.numeric_overall || {};
     const suspects = r.suspect_exclude || [];
 
     // 前5行表格列定义（全部列，靠横向滚动展示）
@@ -161,6 +163,8 @@ const ToolResult: React.FC<{ tc: ToolCallRecord }> = ({ tc }) => {
     if (tc.hasError) return <Text type="danger" style={{ fontSize: 12 }}>✗ {r.error}</Text>;
 
     switch (tc.tool) {
+        case 'handle_missing_values':
+            return <div style={s}>已填充 <b style={{ color: '#1677ff' }}>{r.cols_filled_count}</b> 列，填充值 <Text code>{r.fill_value}</Text>，新数据集 ID：<b>{r.new_dataset_id}</b></div>;
         case 'get_data_overview':
             return <DataOverviewResult r={r} />;
         case 'run_iv_report':
@@ -176,7 +180,7 @@ const ToolResult: React.FC<{ tc: ToolCallRecord }> = ({ tc }) => {
                     <Space wrap style={{ fontSize: 12, marginTop: 2 }}>
                         {m.train_auc && <Tag color="blue">Train AUC {Number(m.train_auc).toFixed(4)}</Tag>}
                         {m.valid_auc && <Tag color="green">Valid AUC {Number(m.valid_auc).toFixed(4)}</Tag>}
-                        {m.oot_ks   && <Tag color="orange">OOT KS {Number(m.oot_ks).toFixed(4)}</Tag>}
+                        {m.oot_ks && <Tag color="orange">OOT KS {Number(m.oot_ks).toFixed(4)}</Tag>}
                         <Tag>result_id: {r.model_result_id}</Tag>
                     </Space>
                 );
@@ -191,7 +195,7 @@ const ToolResult: React.FC<{ tc: ToolCallRecord }> = ({ tc }) => {
         case 'deploy_model':
             return <div style={s}>模型已上线，部署ID：<Text code>{r.deployment_id}</Text></div>;
         case 'deploy_strategy':
-            return <div style={s}>策略已上线，共 <b style={{ color: '#52c41a' }}>{r.rules_count}</b> 条规则</div>;
+            return <div style={s}>策略已上线，共 <b style={{ color: '#52c41a' }}>{r.rules_count}</b> 条规则，合并逻辑：<Text code>{r.combine_logic || 'and'}</Text></div>;
         case 'strategy_backtest':
             return <div style={s}>批次 {r.batch_name}：预估通过率 <b style={{ color: '#1677ff' }}>{r.approval_rate ? (r.approval_rate * 100).toFixed(2) : 0}%</b> (总样本 {r.total_count})</div>;
         case 'list_trained_models':
@@ -219,7 +223,7 @@ const ToolResult: React.FC<{ tc: ToolCallRecord }> = ({ tc }) => {
                         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
                             <thead>
                                 <tr style={{ background: '#f5f5f5', textAlign: 'left' }}>
-                                    <th style={{ padding: '4px 0' }}>概率区间 (Proba)</th>
+                                    <th style={{ padding: '4px 0' }}>分数区间</th>
                                     <th>坏率</th>
                                     <th>样本占比</th>
                                     <th>累计占比</th>
@@ -227,11 +231,11 @@ const ToolResult: React.FC<{ tc: ToolCallRecord }> = ({ tc }) => {
                             </thead>
                             <tbody>
                                 {(r.cutoff_table || []).slice(0, 10).map((row: any, idx: number) => {
-                                    const fmt = (v: any) => v !== undefined ? Number(v).toFixed(4) : '-';
+                                    const fmt = (v: any) => v !== undefined ? Math.round(Number(v)) : '-';
                                     return (
                                         <tr key={idx} style={{ borderBottom: '1px solid #f0f0f0' }}>
                                             <td style={{ padding: '4px 0' }}>{fmt(row.train_min)} - {fmt(row.train_max)}</td>
-                                            <td>{(row.train_bad_rate * 100).toFixed(2)}%</td>
+                                            <td>{(row.train_bad_rate * 100).toFixed(4)}%</td>
                                             <td>{((row.train_total_prop || 0) * 100).toFixed(1)}%</td>
                                             <td>{((row.train_cum_total_prop || 0) * 100).toFixed(1)}%</td>
                                         </tr>
@@ -247,8 +251,8 @@ const ToolResult: React.FC<{ tc: ToolCallRecord }> = ({ tc }) => {
                 <div style={s}>
                     模型 {r.model_result_id} 的报告详情已加载。
                     <div style={{ marginTop: 4, fontSize: 12 }}>
-                        • 数据样本: {r.data_summary?.length || 0} 个数据集<br/>
-                        • 特征数量: {r.feature_importance?.length || 0} 个<br/>
+                        • 数据样本: {r.data_summary?.length || 0} 个数据集<br />
+                        • 特征数量: {r.feature_importance?.length || 0} 个<br />
                         • PSI 稳定性: {r.psi_monthly?.length || 0} 个月数据
                     </div>
                 </div>
@@ -266,6 +270,30 @@ const ToolResult: React.FC<{ tc: ToolCallRecord }> = ({ tc }) => {
                             ))}
                         </ul>
                     )}
+                </div>
+            );
+        case 'list_project_strategies':
+            return (
+                <div style={s}>
+                    共找到 <b>{r.total || 0}</b> 个历史保存策略：
+                    {r.strategies && r.strategies.length > 0 && (
+                        <ul style={{ paddingLeft: 20, margin: '4px 0 0 0' }}>
+                            {r.strategies.map((st: any) => (
+                                <li key={st.id}>
+                                    ID:{st.id} - <b>{st.name}</b> [{st.status === 'active' ? '已上线' : '下架/草稿'}] (优先级: {st.priority}) - {st.rules?.length || 0} 条规则
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </div>
+            );
+        case 'update_strategy_status':
+            return (
+                <div style={s}>
+                    ✅ 策略 <b>{r.name}</b> (ID: {r.strategy_id}) 状态更新为：
+                    <Tag color={r.status === 'active' ? 'success' : 'default'} style={{ marginLeft: 8 }}>
+                        {r.status === 'active' ? '已上线' : '已下架/草稿'}
+                    </Tag>
                 </div>
             );
         default:
@@ -297,14 +325,7 @@ const ToolCallCard: React.FC<{ tc: ToolCallRecord }> = ({ tc }) => (
 // ── 助手气泡 ───────────────────────────────────────────────────────────────────
 const AssistantBubble: React.FC<{ turn: AssistantTurn }> = ({ turn }) => (
     <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
-        <div style={{
-            width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
-            background: 'linear-gradient(135deg, #1677ff, #722ed1)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-            <RobotOutlined style={{ color: '#fff', fontSize: 18 }} />
-        </div>
-        <div style={{ flex: 1, maxWidth: 'calc(100% - 46px)' }}>
+        <div style={{ flex: 1 }}>
             {turn.toolCalls.length > 0 && (
                 <div style={{ marginBottom: turn.finalText ? 8 : 0 }}>
                     {turn.toolCalls.map((tc, i) => <ToolCallCard key={i} tc={tc} />)}
@@ -324,14 +345,9 @@ const AssistantBubble: React.FC<{ turn: AssistantTurn }> = ({ turn }) => (
                         .markdown-body code { background-color: rgba(27,31,35,.05); border-radius: 3px; padding: .2em .4em; font-family: SFMono-Regular,Consolas,Liberation Mono,Menlo,monospace; font-size: 85%; }
                         .markdown-body pre { background-color: #f6f8fa; border-radius: 3px; padding: 16px; overflow: auto; line-height: 1.45; }
                     `}</style>
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                        {turn.finalText.includes('完成') && <TrophyOutlined style={{ color: '#52c41a', marginTop: 4 }} />}
-                        <div style={{ flex: 1, overflow: 'hidden' }}>
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                {turn.finalText}
-                            </ReactMarkdown>
-                        </div>
-                    </div>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {turn.finalText}
+                    </ReactMarkdown>
                 </div>
             )}
             {turn.isStreaming && turn.toolCalls.length === 0 && !turn.finalText && (
@@ -349,14 +365,7 @@ const AssistantBubble: React.FC<{ turn: AssistantTurn }> = ({ turn }) => (
 
 // ── 用户气泡 ───────────────────────────────────────────────────────────────────
 const UserBubble: React.FC<{ content: string }> = ({ content }) => (
-    <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexDirection: 'row-reverse' }}>
-        <div style={{
-            width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
-            background: '#e6f4ff',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-            <UserOutlined style={{ color: '#1677ff', fontSize: 18 }} />
-        </div>
+    <div style={{ display: 'flex', marginBottom: 16, justifyContent: 'flex-end' }}>
         <div style={{ background: '#e6f4ff', borderRadius: 8, padding: '10px 14px', maxWidth: '75%' }}>
             <Text style={{ whiteSpace: 'pre-wrap' }}>{content}</Text>
         </div>
@@ -368,18 +377,18 @@ const AgentPage: React.FC = () => {
     const { currentProjectId, currentDatasetId, excludeCols } = useAppStore();
     const { token } = useUserStore();
 
-    const [dep, setDep]             = useState('label');
+    const [dep, setDep] = useState('label');
     const [modelType, setModelType] = useState('xgb');
-    const [nTrials, setNTrials]     = useState<number>(30);
+    const [nTrials, setNTrials] = useState<number>(30);
     const [showSettings, setShowSettings] = useState(true);
 
     const [chatEntries, setChatEntries] = useState<ChatEntry[]>([]);
     const [historyMsgs, setHistoryMsgs] = useState<HistoryMessage[]>([]);
-    const [inputText, setInputText]     = useState('');
-    const [isStreaming, setIsStreaming]  = useState(false);
+    const [inputText, setInputText] = useState('');
+    const [isStreaming, setIsStreaming] = useState(false);
 
     const bottomRef = useRef<HTMLDivElement>(null);
-    const abortRef  = useRef<AbortController | null>(null);
+    const abortRef = useRef<AbortController | null>(null);
 
     // 当项目或数据集切换时，清空历史，避免旧的上下文 (包含旧ID) 被发送给 LLM
     useEffect(() => {
@@ -462,8 +471,8 @@ const AgentPage: React.FC = () => {
                         finalText = frame.summary || frame.assistant_message || '';
                         updateLast(t => ({ ...t, finalText, isStreaming: false }));
                         setHistoryMsgs(prev => [...prev,
-                            { role: 'user', content: text },
-                            { role: 'assistant', content: finalText },
+                        { role: 'user', content: text },
+                        { role: 'assistant', content: finalText },
                         ]);
                     }
                     if (frame.type === 'error') { updateLast(t => ({ ...t, isStreaming: false, hasError: true, finalText: frame.message })); }
@@ -477,18 +486,25 @@ const AgentPage: React.FC = () => {
         }
     };
 
-    const handleStop  = () => { abortRef.current?.abort(); setIsStreaming(false); };
+    const handleStop = () => { abortRef.current?.abort(); setIsStreaming(false); };
     const handleClear = () => { setChatEntries([]); setHistoryMsgs([]); };
-    const handleKey   = (e: React.KeyboardEvent) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } };
+    const handleKey = (e: React.KeyboardEvent) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } };
 
-    const QUICK_CMDS = ['请开始完整建模流程', '帮我看看数据', '做描述性统计', '帮我做 IV 分析', '执行变量筛选', '开始训练模型', '生成模型报告'];
+    const QUICK_CMDS = [
+        '请开始完整建模流程',
+        '帮我做数据概览',
+        '帮我计算 IV 和 PSI',
+        '筛选入模变量',
+        '查看已训练模型',
+        '挖掘拦截规则',
+        '执行模拟监控',
+    ];
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 120px)' }}>
 
             {/* 顶栏 */}
             <div style={{ padding: '12px 16px', background: '#fff', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-                <RobotOutlined style={{ fontSize: 20, color: '#1677ff' }} />
                 <span style={{ fontWeight: 600, fontSize: 16 }}>智能建模 Agent</span>
                 <div style={{ flex: 1 }} />
                 {currentProjectId ? <Tag color="blue">项目 {currentProjectId}</Tag> : <Tag>未选项目</Tag>}
@@ -526,11 +542,25 @@ const AgentPage: React.FC = () => {
                         {!isReady
                             ? <Alert type="warning" showIcon message="请先在「项目管理」选择项目，并在「数据管理」上传数据集" style={{ maxWidth: 500, margin: '0 auto' }} />
                             : (<>
-                                <RobotOutlined style={{ fontSize: 48, color: '#d9d9d9', marginBottom: 16 }} />
-                                <div style={{ color: '#8c8c8c', marginBottom: 20 }}>你好！我是 AutoModeling 智能建模助手。开始建模前我会先帮你查看数据并确认排除列。</div>
-                                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-                                    {QUICK_CMDS.map(cmd => (
-                                        <Tag key={cmd} style={{ cursor: 'pointer', padding: '4px 10px', borderRadius: 12 }} onClick={() => setInputText(cmd)}>{cmd}</Tag>
+                                <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 64, height: 64, borderRadius: '50%', background: 'linear-gradient(135deg, #1890ff, #722ed1)', marginBottom: 16 }}>
+                                    <RobotOutlined style={{ fontSize: 32, color: '#fff' }} />
+                                </div>
+                                <Title level={3} style={{ marginBottom: 8, fontWeight: 600 }}>
+                                    智能建模与策略优化顾问
+                                </Title>
+                                <Paragraph style={{ color: '#595959', maxWidth: 600, margin: '0 auto 28px auto', fontSize: 13, lineHeight: 1.6 }}>
+                                    我是您的信贷风控建模顾问。我已集成风控评分卡理论与自动化计算能力，能够全方位辅助您进行数据探索、策略分析与实验监控。
+                                </Paragraph>
+
+                                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', maxWidth: 680, margin: '0 auto', justifyContent: 'center' }}>
+                                    {QUICK_CMDS.map((cmd: string) => (
+                                        <Tag
+                                            key={cmd}
+                                            style={{ cursor: 'pointer', padding: '4px 12px', borderRadius: 12, fontSize: 12, border: '1px solid #e8e8e8' }}
+                                            onClick={() => setInputText(cmd)}
+                                        >
+                                            {cmd}
+                                        </Tag>
                                     ))}
                                 </div>
                             </>)

@@ -143,6 +143,94 @@ class AgentToolkit:
             return {"error": str(e)}
 
     # ──────────────────────────────────────────────────────────
+    # Tool: handle_missing_values
+    # ──────────────────────────────────────────────────────────
+    def handle_missing_values(
+        self,
+        project_id: int,
+        dataset_id: int,
+        fill_value: float = -999.0,
+        exclude_cols: list = None,
+    ) -> dict:
+        """
+        对数值列缺失值进行填充，生成新数据集快照，返回 new_dataset_id。
+        复用 /impute API 的核心逻辑，直接操作文件和 DB，不走 HTTP。
+        """
+        import os
+        import time
+        import pandas as pd
+        from datetime import datetime
+
+        exclude_cols = exclude_cols or []
+
+        dataset = self.db.query(Dataset).filter(Dataset.id == dataset_id).first()
+        if not dataset:
+            return {"error": f"数据集 {dataset_id} 不存在"}
+
+        try:
+            # 加载数据
+            if dataset.file_path.endswith('.parquet'):
+                df = pd.read_parquet(dataset.file_path)
+            else:
+                df = pd.read_csv(dataset.file_path)
+
+            # 统计填充前缺失情况
+            before_missing = int(df.isnull().sum().sum())
+            cols_filled = []
+            for col in df.columns:
+                if col in exclude_cols:
+                    continue
+                if pd.api.types.is_numeric_dtype(df[col]) and df[col].isnull().any():
+                    df[col] = df[col].fillna(fill_value)
+                    cols_filled.append(col)
+
+            # 写新文件快照
+            base, ext = os.path.splitext(dataset.file_path)
+            new_file_path = f"{base}_imputed_{int(time.time())}{ext}"
+            if new_file_path.endswith('.parquet'):
+                df.to_parquet(new_file_path, index=False)
+            else:
+                df.to_csv(new_file_path, index=False)
+
+            # 创建新数据集记录
+            ts = datetime.now().strftime('%m%d_%H%M')
+            new_dataset = Dataset(
+                project_id=project_id,
+                name=f"{dataset.name}_已填充({int(fill_value)})_{ts}",
+                file_path=new_file_path,
+                file_size=os.path.getsize(new_file_path),
+                n_rows=dataset.n_rows,
+                n_cols=dataset.n_cols,
+                columns_info=dataset.columns_info,
+                impute_value=fill_value,
+            )
+            self.db.add(new_dataset)
+            self.db.commit()
+            self.db.refresh(new_dataset)
+
+            # 缓存统计信息
+            try:
+                from scorecard_core.data_processor import calculate_dataset_summary
+                stats, l1_res = calculate_dataset_summary(df, impute_value=fill_value)
+                new_dataset.stats_cache = stats
+                new_dataset.l1_results = l1_res
+                self.db.commit()
+            except Exception:
+                pass  # 统计缓存失败不影响主流程
+
+            return {
+                "new_dataset_id": new_dataset.id,
+                "fill_value": fill_value,
+                "cols_filled_count": len(cols_filled),
+                "cols_filled": cols_filled[:20],  # 最多展示 20 列
+                "before_missing_cells": before_missing,
+                "message": f"已用 {fill_value} 填充 {len(cols_filled)} 列的缺失值，新数据集 ID 为 {new_dataset.id}，后续建模请使用此 dataset_id。",
+            }
+        except Exception as e:
+            logger.exception("handle_missing_values 失败")
+            return {"error": str(e)}
+
+    # ──────────────────────────────────────────────────────────
     def run_iv_report(
         self,
         project_id: int,
@@ -925,3 +1013,240 @@ class AgentToolkit:
         except Exception as e:
             logger.exception("get_strategy_monitor_logs 失败")
             return {"error": str(e)}
+
+    # ----------------------------------------------------------
+    # Tool: run_swap_analysis (Swap In/Out)
+    # ----------------------------------------------------------
+    def run_swap_analysis(
+        self,
+        project_id: int,
+        dataset_id: int,
+        label_col: str,
+        # 推荐方式：直接传策略 ID，后端自动读取规则
+        old_strategy_id: int = None,
+        new_strategy_id: int = None,
+        # 分数策略必填：显式模型 ID，触发实时打分
+        model_result_id: int = None,
+        # 兼容方式：手动指定字段和规则
+        old_col: str = None,
+        old_reject_op: str = None,
+        old_reject_val=None,
+        new_col: str = None,
+        new_reject_op: str = None,
+        new_reject_val=None,
+        new_col_bins: list = None,
+        old_rules: list = None,
+        old_combine_logic: str = 'and',
+        old_rule_type: str = 'reject',
+        new_rules: list = None,
+        new_combine_logic: str = 'and',
+        new_rule_type: str = 'reject',
+        **kwargs
+    ) -> dict:
+        """
+        策略置换分析（Swap In/Out）。
+        支持两种模式：
+          1. 传 old_strategy_id / new_strategy_id，后端自动从 DB 读取规则（含分数策略的模型关联）。
+          2. 手动传 old_col/op/val + new_col/op/val；分数策略需额外传 model_result_id。
+        """
+        from app.models import Strategy as StrategyModel, ModelResult, Deployment
+        from scorecard_core.strategy_engine import enrich_df_with_model_scores
+
+        dataset = self.db.query(Dataset).filter(Dataset.id == dataset_id).first()
+        if not dataset:
+            return {"error": f"数据集 {dataset_id} 不存在"}
+        try:
+            from scorecard_core.data_processor import load_data
+            df = load_data(dataset.file_path)
+        except Exception as e:
+            logger.exception("run_swap_analysis 加载数据失败")
+            return {"error": str(e)}
+
+        # ── 辅助：从 DB 读取策略规则 ────────────────────────────
+        def _load_strategy(sid):
+            st = self.db.query(StrategyModel).filter(StrategyModel.id == sid).first()
+            if not st:
+                return None, 'and', 'reject', None
+            rules_list = [r if isinstance(r, dict) else r.dict() for r in (st.rules or [])]
+            mid = None
+            for r in rules_list:
+                f = r.get('field', '')
+                if f.startswith('_model_result_'):
+                    try:
+                        mid = int(f.replace('_model_result_', ''))
+                    except ValueError:
+                        pass
+                    break
+            return rules_list, st.combine_logic or 'and', st.rule_type or 'reject', mid
+
+        # ── 辅助：解析字段名对应的 model_id ─────────────────────
+        def _resolve_mid(col):
+            if not col:
+                return None
+            if col.startswith('_model_result_'):
+                try:
+                    return int(col.replace('_model_result_', ''))
+                except ValueError:
+                    pass
+            if col.lower() == 'score':
+                dep = self.db.query(Deployment).filter(
+                    Deployment.project_id == project_id, Deployment.status == 'active'
+                ).first()
+                if dep:
+                    return dep.model_result_id
+                latest = self.db.query(ModelResult).filter(
+                    ModelResult.project_id == project_id
+                ).order_by(ModelResult.created_at.desc()).first()
+                if latest:
+                    return latest.id
+            return None
+
+        # ── 提取旧策略规则 ──────────────────────────────────────
+        old_model_id = None
+        if old_strategy_id:
+            old_rules_list, old_combine_logic, old_rule_type, old_model_id = _load_strategy(old_strategy_id)
+            if old_rules_list is None:
+                return {"error": f"旧策略 {old_strategy_id} 不存在"}
+        else:
+            old_rules_list = old_rules if old_rules is not None else []
+            if not old_rules_list and old_col and old_reject_op:
+                old_rules_list = [{"field": old_col, "op": old_reject_op, "val": old_reject_val}]
+
+        # ── 提取新策略规则 ──────────────────────────────────────
+        new_model_id = None
+        if new_strategy_id:
+            new_rules_list, new_combine_logic, new_rule_type, new_model_id = _load_strategy(new_strategy_id)
+            if new_rules_list is None:
+                return {"error": f"新策略 {new_strategy_id} 不存在"}
+        else:
+            new_rules_list = new_rules if new_rules is not None else []
+            if not new_rules_list and new_col and new_reject_op:
+                new_rules_list = [{"field": new_col, "op": new_reject_op, "val": new_reject_val}]
+
+        # ── 统一模型打分补全 ────────────────────────────────────
+        explicit_mid = model_result_id or kwargs.get('model_result_id')
+        mids_to_score = set()
+        for r in old_rules_list + new_rules_list:
+            col = r.get('field', '')
+            if col in df.columns:
+                continue
+            mid = explicit_mid or old_model_id or new_model_id or _resolve_mid(col)
+            if mid:
+                r['field'] = f'_model_result_{mid}'
+                mids_to_score.add(mid)
+        if explicit_mid:
+            mids_to_score.add(explicit_mid)
+        if mids_to_score:
+            enrich_rules = [{'field': f'_model_result_{mid}'} for mid in mids_to_score]
+            try:
+                df = enrich_df_with_model_scores(df, enrich_rules, self.db, ModelResult)
+                logger.info(f"run_swap_analysis：已为模型 {mids_to_score} 完成实时打分")
+            except Exception as e:
+                logger.warning(f"run_swap_analysis 打分失败: {e}")
+
+        # ── 确定 Swap 用的 old_col / new_col ───────────────────
+        def _pick_col(req_col, rules, fallback_mid):
+            if req_col and req_col in df.columns:
+                return req_col
+            if req_col:
+                mid = fallback_mid or explicit_mid or _resolve_mid(req_col)
+                if mid:
+                    norm = f'_model_result_{mid}'
+                    if norm in df.columns:
+                        return norm
+            if rules:
+                f = rules[0].get('field')
+                if f and f in df.columns:
+                    return f
+            return req_col
+
+        eff_old_col = _pick_col(old_col, old_rules_list, old_model_id)
+        eff_new_col = _pick_col(new_col, new_rules_list, new_model_id)
+
+        try:
+            from scorecard_core.swap_analysis import run_swap_analysis as _calc
+            return _calc(
+                df=df,
+                old_col=eff_old_col,
+                old_reject_op=old_reject_op,
+                old_reject_val=old_reject_val,
+                new_col=eff_new_col,
+                new_reject_op=new_reject_op,
+                new_reject_val=new_reject_val,
+                label_col=label_col,
+                new_col_bins=new_col_bins,
+                old_rules=old_rules_list,
+                old_combine_logic=old_combine_logic,
+                old_rule_type=old_rule_type,
+                new_rules=new_rules_list,
+                new_combine_logic=new_combine_logic,
+                new_rule_type=new_rule_type,
+            )
+        except Exception as e:
+            logger.exception("run_swap_analysis 计算失败")
+            return {"error": str(e)}
+
+    # ──────────────────────────────────────────────────────────
+    # Tool 15: list_project_strategies
+    # ──────────────────────────────────────────────────────────
+    def list_project_strategies(self, project_id: int) -> dict:
+        """获取项目下所有已保存的策略方案（包含已上线/下架/草稿等所有状态）"""
+        from app.models import Strategy
+        try:
+            strategies = self.db.query(Strategy).filter(
+                Strategy.project_id == project_id
+            ).order_by(Strategy.priority.asc(), Strategy.created_at.desc()).all()
+            
+            return {
+                "project_id": project_id,
+                "total": len(strategies),
+                "strategies": [
+                    {
+                        "id": s.id,
+                        "name": s.name,
+                        "description": s.description,
+                        "status": s.status,
+                        "rules": s.rules,
+                        "combine_logic": s.combine_logic or "and",
+                        "rule_type": s.rule_type,
+                        "priority": s.priority,
+                        "metrics": s.metrics,
+                        "created_at": s.created_at.isoformat() if s.created_at else None
+                    } for s in strategies
+                ]
+            }
+        except Exception as e:
+            logger.exception("list_project_strategies 失败")
+            return {"error": str(e)}
+
+    # ──────────────────────────────────────────────────────────
+    # Tool 16: update_strategy_status
+    # ──────────────────────────────────────────────────────────
+    def update_strategy_status(self, project_id: int, strategy_id: int, status: str) -> dict:
+        """更新策略的工作状态，支持上线（active）或下架（draft）"""
+        from app.models import Strategy
+        if status not in ['active', 'draft']:
+            return {"error": "status 必须是 'active' 或 'draft'"}
+        try:
+            strategy = self.db.query(Strategy).filter(
+                Strategy.id == strategy_id,
+                Strategy.project_id == project_id
+            ).first()
+            if not strategy:
+                return {"error": f"项目 {project_id} 下未找到策略 {strategy_id}"}
+            
+            strategy.status = status
+            self.db.commit()
+            self.db.refresh(strategy)
+            
+            status_zh = "上线" if status == "active" else "下架"
+            return {
+                "strategy_id": strategy.id,
+                "name": strategy.name,
+                "status": strategy.status,
+                "message": f"策略【{strategy.name}】已成功{status_zh}"
+            }
+        except Exception as e:
+            logger.exception("update_strategy_status 失败")
+            return {"error": str(e)}
+
