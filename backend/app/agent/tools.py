@@ -629,7 +629,7 @@ class AgentToolkit:
             if isinstance(r, dict):
                 rule_obj = r
             else:
-                match = re.match(r"^\s*([a-zA-Z0-9_]+)\s*(>|<|>=|<=|==|!=)\s*(.+)$", str(r).strip())
+                match = re.match(r"^\s*([a-zA-Z0-9_]+)\s*(>=|<=|==|!=|>|<)\s*(.+)$", str(r).strip())
                 if match:
                     rule_obj = {
                         "field": match.group(1),
@@ -671,7 +671,7 @@ class AgentToolkit:
                 rule_obj = r
             else:
                 # 解析类似于 'age > 30' 或 'score < 500' 的表达式
-                match = re.match(r"^\s*([a-zA-Z0-9_]+)\s*(>|<|>=|<=|==|!=)\s*(.+)$", str(r).strip())
+                match = re.match(r"^\s*([a-zA-Z0-9_]+)\s*(>=|<=|==|!=|>|<)\s*(.+)$", str(r).strip())
                 if match:
                     rule_obj = {
                         "field": match.group(1),
