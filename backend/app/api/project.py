@@ -180,6 +180,8 @@ def upload_dataset(project_id: int, file: UploadFile = File(...), db: Session = 
 @router.delete('/{project_id}')
 def delete_project(project_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     """删除项目及其所有关联的物理文件"""
+    from app.models import ModelReport, MonitoringLog, StrategyMonitoringLog, Strategy
+
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail='项目不存在')
@@ -189,7 +191,6 @@ def delete_project(project_id: int, db: Session = Depends(get_db), current_user 
         raise HTTPException(status_code=403, detail='无权删除该项目')
 
     # 清理物理文件：模型报告 (.xlsx)
-    from app.models import ModelReport, MonitoringLog, StrategyMonitoringLog, Strategy
     for report in db.query(ModelReport).filter(ModelReport.project_id == project_id).all():
         if report.file_path and os.path.exists(report.file_path):
             try: os.remove(report.file_path)
@@ -211,8 +212,31 @@ def delete_project(project_id: int, db: Session = Depends(get_db), current_user 
     project_dir = os.path.join(UPLOAD_DIR, str(project_id))
     if os.path.isdir(project_dir):
         shutil.rmtree(project_dir, ignore_errors=True)
-        
-    # ORM 级联删除 (cascade='all, delete-orphan' 会处理关联表)
+
+    # ---------------------------------------------------------------
+    # 先删除引用 model_results 的子表记录，避免 FK 约束冲突：
+    #   deployments.model_result_id -> model_results.id
+    #   model_reports.model_result_id -> model_results.id
+    # ORM 的 cascade='all, delete-orphan' 只覆盖 Project 的直接子表，
+    # 不会递归处理这两张"跨越" model_results 的引用表。
+    # ---------------------------------------------------------------
+    # 1) 先删 monitoring_logs（依赖 deployments）
+    from sqlalchemy import delete as sa_delete
+    mr_ids = [r.id for r in db.query(ModelResult.id).filter(ModelResult.project_id == project_id).all()]
+    if mr_ids:
+        dep_ids = [d.id for d in db.query(Deployment.id).filter(
+            Deployment.model_result_id.in_(mr_ids)).all()]
+        if dep_ids:
+            db.query(MonitoringLog).filter(MonitoringLog.deployment_id.in_(dep_ids)).delete(
+                synchronize_session=False)
+        # 2) 删 deployments
+        db.query(Deployment).filter(Deployment.model_result_id.in_(mr_ids)).delete(
+            synchronize_session=False)
+        # 3) 删 model_reports
+        db.query(ModelReport).filter(ModelReport.model_result_id.in_(mr_ids)).delete(
+            synchronize_session=False)
+
+    # ORM 级联删除 Project（会级联删除 model_results、datasets、tasks 等直接子表）
     db.delete(project)
     db.commit()
     return {'message': '已删除'}

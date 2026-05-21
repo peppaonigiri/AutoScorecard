@@ -139,17 +139,18 @@ def get_user_projects(user_id: int, current_user: User = Depends(get_current_adm
 @router.delete("/{user_id}")
 def delete_user(user_id: int, current_user: User = Depends(get_current_admin_user), db: Session = Depends(get_db)):
     """管理员删除用户（级联删除所有项目及物理文件）"""
+    from app.models import Project, ModelResult, Deployment, MonitoringLog, ModelReport
+
     target_user = db.query(User).filter(User.id == user_id).first()
     if not target_user:
         raise HTTPException(status_code=404, detail="User not found")
     if target_user.username == "root":
         raise HTTPException(status_code=403, detail="Cannot delete root user")
-    
-    # 物理文件清理：获取该用户的所有项目ID
-    # 由于设置了级联删除，我们需要在从DB删除User之前手动清理文件
-    from app.models import Project
+
     projects = db.query(Project).filter(Project.owner_id == user_id).all()
-    
+    project_ids = [p.id for p in projects]
+
+    # 1. 物理文件清理（上传目录）
     for proj in projects:
         proj_dir = os.path.join(UPLOAD_DIR, str(proj.id))
         if os.path.exists(proj_dir):
@@ -159,8 +160,26 @@ def delete_user(user_id: int, current_user: User = Depends(get_current_admin_use
                 import logging
                 logging.error(f"清理用户项目目录失败 {proj_dir}: {e}")
 
-    # 从数据库删除 (触发 ORM 级联关系)
+    # 2. 手动删除引用 model_results 的子表，避免 FK 约束冲突：
+    #    deployments.model_result_id -> model_results.id
+    #    model_reports.model_result_id -> model_results.id
+    #    ORM cascade 只覆盖 Project 直接子表，不会递归处理这两张表。
+    if project_ids:
+        mr_ids = [r.id for r in db.query(ModelResult.id).filter(
+            ModelResult.project_id.in_(project_ids)).all()]
+        if mr_ids:
+            dep_ids = [d.id for d in db.query(Deployment.id).filter(
+                Deployment.model_result_id.in_(mr_ids)).all()]
+            if dep_ids:
+                db.query(MonitoringLog).filter(
+                    MonitoringLog.deployment_id.in_(dep_ids)).delete(synchronize_session=False)
+            db.query(Deployment).filter(
+                Deployment.model_result_id.in_(mr_ids)).delete(synchronize_session=False)
+            db.query(ModelReport).filter(
+                ModelReport.model_result_id.in_(mr_ids)).delete(synchronize_session=False)
+
+    # 3. ORM 级联删除 User（会级联删除 projects → model_results/datasets/tasks）
     db.delete(target_user)
     db.commit()
-    
+
     return {"success": True, "detail": f"User {user_id} and all related data deleted"}
