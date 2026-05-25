@@ -285,11 +285,10 @@ def run_optuna_training(db, task_id, progress_callback,
                              oot_start_time=oot_start_time,
                              random_state=42)
 
-    # 确定特征列
     if feature_list and len(feature_list) > 0:
         ft_lst = feature_list
     else:
-        default_exclude = list(set(exclude_cols + [dep, 'target', 'weight']))
+        default_exclude = list(set((exclude_cols or []) + [dep, 'target', 'weight'] + ([oot_col] if oot_col else [])))
         ft_lst = [c for c in df.columns if c not in default_exclude]
 
     progress_callback(10, {'stage': '开始 Optuna 调参', 'n_features': len(ft_lst)})

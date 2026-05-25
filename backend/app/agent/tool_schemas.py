@@ -109,6 +109,10 @@ PHASE1_TOOLS = [
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "需要排除的列名（如 ID 列、时间列）。默认 []"
+                    },
+                    "oot_col": {
+                        "type": "string",
+                        "description": "时间列名。传入后 OOT 集取该列末尾 20% 时间段，PSI 更能反映时序稳定性。请根据 get_data_overview 返回的列名判断哪列是时间/日期列（如 apply_date、loan_month、ds 等），不确定时可不传。"
                     }
                 },
                 "required": ["project_id", "dataset_id", "dep"]
@@ -154,6 +158,10 @@ PHASE1_TOOLS = [
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "排除列，同 iv_report 保持一致"
+                    },
+                    "oot_col": {
+                        "type": "string",
+                        "description": "时间列名"
                     }
                 },
                 "required": ["project_id", "dataset_id", "dep"]
@@ -366,22 +374,6 @@ PHASE2_TOOLS = [
                     "model_result_id": {"type": "integer", "description": "可选。如果要制定分数策略，请提供对应的模型 ID"}
                 },
                 "required": ["project_id", "rules"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "strategy_backtest",
-            "description": "策略/模型上线后，对指定的数据集进行回溯（Backtest），评估上线后的拦截率、坏率、PSI 等监控指标。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "project_id": {"type": "integer"},
-                    "dataset_id": {"type": "integer", "description": "用于回溯的数据集 ID"},
-                    "batch_name": {"type": "string", "description": "回溯批次名称"}
-                },
-                "required": ["project_id", "dataset_id"]
             }
         }
     },

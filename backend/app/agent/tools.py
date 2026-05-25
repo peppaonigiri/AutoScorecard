@@ -238,6 +238,7 @@ class AgentToolkit:
         dep: str,
         split_ratios: list = None,
         exclude_cols: list = None,
+        oot_col: str = None,
     ) -> dict:
         """计算 IV / PSI 报告，持久化到 project.iv_report"""
         split_ratios = split_ratios or [0.6, 0.2, 0.2]
@@ -256,22 +257,33 @@ class AgentToolkit:
             from scorecard_core.feature_engineer import calc_multi_set_metrics
 
             df = load_data(dataset.file_path)
-            datasets = split_dataset(df, dep=dep, ratios=split_ratios)
+            split_config = project.split_config or {}
+            datasets = split_dataset(
+                df, dep=dep,
+                ratios=split_ratios,
+                oot_col=oot_col or split_config.get('oot_col'),
+                oot_start_time=split_config.get('oot_start_time'),
+                oot_pct=split_config.get('oot_pct'),
+            )
 
-            default_exclude = list(set(exclude_cols + [dep, 'target', 'weight']))
+            effective_oot_col = oot_col or split_config.get('oot_col')
+            default_exclude = list(set(exclude_cols + [dep, 'target', 'weight'] + ([effective_oot_col] if effective_oot_col else [])))
             ft_lst = [c for c in df.columns if c not in default_exclude]
 
             report = calc_multi_set_metrics(datasets, ft_lst, dep=dep)
             features = report.to_dict(orient='records')
 
-            # 持久化
+            # 持久化（flag_modified 强制通知 SQLAlchemy JSON 列已变更）
+            from sqlalchemy.orm.attributes import flag_modified
             project.iv_report = features
             project.split_config = {
                 'split_ratios': split_ratios,
-                'oot_col': None,
-                'oot_start_time': None,
-                'oot_pct': None
+                'oot_col': oot_col or split_config.get('oot_col'),
+                'oot_start_time': split_config.get('oot_start_time'),
+                'oot_pct': split_config.get('oot_pct'),
             }
+            flag_modified(project, 'split_config')
+            flag_modified(project, 'iv_report')
             self.db.commit()
 
             # 给 LLM 返回摘要（前 10 条 + 统计），避免 token 爆炸
@@ -302,6 +314,7 @@ class AgentToolkit:
         psi_threshold: float = 0.1,
         corr_threshold: float = 0.9,
         exclude_cols: list = None,
+        oot_col: str = None,
     ) -> dict:
         """L2 变量筛选，将保留特征列表写入 project.feature_list"""
         exclude_cols = exclude_cols or []
@@ -322,10 +335,14 @@ class AgentToolkit:
             split_config = project.split_config or {}
             datasets = split_dataset(
                 df, dep=dep,
-                ratios=split_config.get('split_ratios', [0.6, 0.2, 0.2])
+                ratios=split_config.get('split_ratios', [0.6, 0.2, 0.2]),
+                oot_col=oot_col or split_config.get('oot_col'),
+                oot_start_time=split_config.get('oot_start_time'),
+                oot_pct=split_config.get('oot_pct'),
             )
 
-            default_exclude = list(set(exclude_cols + [dep, 'target', 'weight']))
+            effective_oot_col = oot_col or split_config.get('oot_col')
+            default_exclude = list(set(exclude_cols + [dep, 'target', 'weight'] + ([effective_oot_col] if effective_oot_col else [])))
             ft_lst = [c for c in df.columns if c not in default_exclude]
 
             thresholds = {
@@ -345,9 +362,19 @@ class AgentToolkit:
                 impute_value=dataset.impute_value
             )
 
-            # 持久化
+            # 持久化（flag_modified 强制通知 SQLAlchemy JSON 列已变更）
+            from sqlalchemy.orm.attributes import flag_modified
             project.feature_list = result['kept_features']
             project.filter_result = result
+            project.split_config = {
+                'split_ratios': split_config.get('split_ratios', [0.6, 0.2, 0.2]),
+                'oot_col': oot_col or split_config.get('oot_col'),
+                'oot_start_time': split_config.get('oot_start_time'),
+                'oot_pct': split_config.get('oot_pct'),
+            }
+            flag_modified(project, 'feature_list')
+            flag_modified(project, 'filter_result')
+            flag_modified(project, 'split_config')
             self.db.commit()
 
             return {
@@ -384,6 +411,11 @@ class AgentToolkit:
             return {"error": "特征列表为空，请先执行 filter_features"}
 
         try:
+            model_save_dir = os.path.join(MODEL_DIR, str(project_id))
+            split_config = project.split_config or {}
+            effective_oot_col = split_config.get('oot_col')
+            effective_exclude_cols = list(set(exclude_cols + ([effective_oot_col] if effective_oot_col else [])))
+
             task = Task(
                 project_id=project_id,
                 task_type='modeling',
@@ -394,7 +426,7 @@ class AgentToolkit:
                     'model_type': model_type,
                     'n_trials': n_trials,
                     'feature_list': project.feature_list,
-                    'exclude_cols': exclude_cols,
+                    'exclude_cols': effective_exclude_cols,
                 }
             )
             self.db.add(task)
@@ -403,9 +435,6 @@ class AgentToolkit:
 
             from scorecard_core.model_trainer import run_optuna_training
             from app.task_manager import submit_task
-
-            model_save_dir = os.path.join(MODEL_DIR, str(project_id))
-            split_config = project.split_config or {}
 
             await submit_task(
                 task.id,
@@ -418,7 +447,7 @@ class AgentToolkit:
                 n_trials=n_trials,
                 max_depth=6,
                 feature_list=project.feature_list,
-                exclude_cols=exclude_cols,
+                exclude_cols=effective_exclude_cols,
                 project_id=project_id,
                 model_save_dir=model_save_dir,
                 split_ratios=split_config.get('split_ratios', [0.6, 0.2, 0.2]),
@@ -726,44 +755,6 @@ class AgentToolkit:
             logger.exception("deploy_strategy 失败")
             return {"error": str(e)}
 
-    # ──────────────────────────────────────────────────────────
-    # Tool 10: strategy_backtest
-    # ──────────────────────────────────────────────────────────
-    def strategy_backtest(self, project_id: int, dataset_id: int, batch_name: str = "最新批次") -> dict:
-        """
-        进行策略回溯。真实环境应提交 Task 执行 strategy_engine，
-        此处为响应演示做简单统计模拟返回（由于底层未直接暴露一键回测API）
-        """
-        from app.models import StrategyMonitoringLog
-        try:
-            import random
-            total = random.randint(10000, 20000)
-            hit = int(total * random.uniform(0.05, 0.15))
-            pass_c = total - hit
-            
-            log = StrategyMonitoringLog(
-                project_id=project_id,
-                batch_name=batch_name,
-                total_count=total,
-                pass_count=pass_c,
-                hit_count=hit,
-                approval_rate=pass_c/total
-            )
-            self.db.add(log)
-            self.db.commit()
-            self.db.refresh(log)
-            
-            return {
-                "backtest_log_id": log.id,
-                "batch_name": batch_name,
-                "total_count": total,
-                "hit_count": hit,
-                "approval_rate": round(pass_c/total, 4),
-                "conclusion": "回溯完成"
-            }
-        except Exception as e:
-            logger.exception("strategy_backtest 失败")
-            return {"error": str(e)}
 
     # ──────────────────────────────────────────────────────────
     # Tool 11: list_trained_models

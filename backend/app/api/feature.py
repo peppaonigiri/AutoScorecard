@@ -53,7 +53,7 @@ def create_iv_report(project_id: int, req: IVReportRequest, db: Session = Depend
                              oot_start_time=req.oot_start_time,
                              oot_pct=req.oot_pct)
 
-    default_exclude = list(set(req.exclude_cols + [req.dep, 'target', 'weight']))
+    default_exclude = list(set(req.exclude_cols + [req.dep, 'target', 'weight'] + ([req.oot_col] if req.oot_col else [])))
     ft_lst = [c for c in df.columns if c not in default_exclude]
 
     # 计算多集 IV 和 PSI
@@ -100,7 +100,7 @@ def filter_features(project_id: int, req: FeatureFilterRequest, db: Session = De
                              oot_start_time=req.oot_start_time,
                              oot_pct=req.oot_pct)
 
-    default_exclude = list(set(req.exclude_cols + [req.dep, 'target', 'weight']))
+    default_exclude = list(set(req.exclude_cols + [req.dep, 'target', 'weight'] + ([req.oot_col] if req.oot_col else [])))
     ft_lst = [c for c in df.columns if c not in default_exclude]
 
     thresholds = req.thresholds.dict()

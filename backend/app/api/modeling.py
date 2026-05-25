@@ -43,6 +43,9 @@ async def start_modeling(project_id: int, req: ModelingRequest, db: Session = De
     if not dataset:
         raise HTTPException(status_code=404, detail='数据集不存在')
 
+    effective_oot_col = req.oot_col or project.split_config.get('oot_col')
+    effective_exclude_cols = list(set((req.exclude_cols or []) + ([effective_oot_col] if effective_oot_col else [])))
+
     # 创建任务
     task = Task(
         project_id=project_id,
@@ -57,7 +60,7 @@ async def start_modeling(project_id: int, req: ModelingRequest, db: Session = De
             'max_depth': req.max_depth,
             'strategy_threshold': req.strategy_threshold,
             'feature_list': req.feature_list or project.feature_list,
-            'exclude_cols': req.exclude_cols,
+            'exclude_cols': effective_exclude_cols,
         }
     )
     db.add(task)
@@ -72,7 +75,7 @@ async def start_modeling(project_id: int, req: ModelingRequest, db: Session = De
         task_id=task.id,
         func=run_optuna_training,
         data_path=dataset.file_path,
-        exclude_cols=req.exclude_cols,
+        exclude_cols=effective_exclude_cols,
         feature_list=req.feature_list,
         dep=req.dep,
         model_type=req.model_type,
@@ -83,7 +86,7 @@ async def start_modeling(project_id: int, req: ModelingRequest, db: Session = De
         project_id=project_id,
         model_save_dir=model_save_dir,
         split_ratios=req.split_ratios or project.split_config.get('split_ratios'),
-        oot_col=req.oot_col or project.split_config.get('oot_col'),
+        oot_col=effective_oot_col,
         oot_start_time=req.oot_start_time or project.split_config.get('oot_start_time'),
         score_config=req.score_config.dict() if req.score_config else None,
     )

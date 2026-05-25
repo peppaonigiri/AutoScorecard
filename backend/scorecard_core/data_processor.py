@@ -60,8 +60,28 @@ def split_dataset(df, target_col='target', dep='label',
     # 1. 如果指定了 OOT 列，优先按时间截取 OOT 数据
     if oot_col and oot_col in temp_df.columns:
         try:
-            temp_df[oot_col] = pd.to_datetime(temp_df[oot_col])
+            col_vals = temp_df[oot_col].dropna()
+            # 三路分支：已是 datetime → 直通；整数型 → 按位数格式化；字符串 → 直接解析
+            if pd.api.types.is_datetime64_any_dtype(col_vals):
+                pass  # 已是正确类型，无需转换
+            elif pd.api.types.is_numeric_dtype(col_vals):
+                sample = int(col_vals.iloc[0])
+                if 190001 <= sample <= 209912:        # YYYYMM，如 202401
+                    temp_df[oot_col] = pd.to_datetime(
+                        temp_df[oot_col].astype(int).astype(str), format='%Y%m'
+                    )
+                elif 19000101 <= sample <= 20991231:  # YYYYMMDD，如 20240101
+                    temp_df[oot_col] = pd.to_datetime(
+                        temp_df[oot_col].astype(int).astype(str), format='%Y%m%d'
+                    )
+                else:
+                    # Unix 秒时间戳
+                    temp_df[oot_col] = pd.to_datetime(temp_df[oot_col], unit='s', errors='coerce')
+            else:
+                # 字符串类型（含 ISO 8601、'2024-10-02'、'2024-09-07T00:00:00.000000' 等）
+                temp_df[oot_col] = pd.to_datetime(temp_df[oot_col], errors='coerce')
             temp_df = temp_df.sort_values(oot_col)
+
             
             if not oot_pct and not oot_start_time:
                 # 默认使用 ratios 末尾比例作为 OOT 返回（默认0.2）

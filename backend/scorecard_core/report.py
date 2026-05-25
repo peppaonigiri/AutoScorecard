@@ -52,39 +52,37 @@ def generate_model_report(data_end, model, keep_lst, save_dir, model_id, res_dat
     
     # --- PSI 计算 (月度) ---
     # 获取最小月份并将其数据分布作为 Baseline
-    min_month = data_end['month_time'].min()
-    data_min_month = data_end[data_end['month_time'] == min_month]
-    
-    # 在 概率(proba) 上计算分箱，以 train 或最小月份为基准
-    # 这里以 train 的 proba 分箱为基准（更可靠）
+    valid_months = data_end['month_time'].dropna().unique()
+    has_months = len(valid_months) > 1
+
+    min_month = data_end['month_time'].dropna().min() if has_months else None
+    data_min_month = data_end[data_end['month_time'] == min_month] if min_month else data_end
+
+    # 在概率(proba)上计算分箱，以 train 为基准
     data_train = data_end[data_end[target_col] == 'train']
-    # 强制 20 等分（或 10 等分）
     train_edges = toad.transform.Combiner().fit(data_train[['proba', label_col]], y=label_col, method='quantile', n_bins=10).export()['proba']
-    # 转换为包含极值的完整边界列表，防止 pd.cut 报错且覆盖全量程
     train_proba_bins = [-np.inf] + list(train_edges) + [np.inf]
-    
-    # 使用最小月份的分箱占比作为原始对照
+
     def get_dist(df, bins):
         if df.empty:
             return np.zeros(len(bins)-1)
         return pd.cut(df['proba'], bins=bins, include_lowest=True).value_counts(normalize=True).sort_index().values
 
-    # 计算逐月 PSI
+    # 计算逐月 PSI（无时间列时跳过）
     psi_list = []
-    months = sorted(data_end['month_time'].unique())
-    base_dist = get_dist(data_min_month, train_proba_bins)
-    
-    for m in months:
-        if m == min_month:
-            psi_list.append({'month': m, 'psi': 0.0, 'is_baseline': True})
-            continue
-        curr_dist = get_dist(data_end[data_end['month_time'] == m], train_proba_bins)
-        # 简单计算 PSI (含 0 处理)
-        b = np.clip(base_dist, 1e-6, 1)
-        c = np.clip(curr_dist, 1e-6, 1)
-        psi_val = np.sum((c - b) * np.log(c / b))
-        psi_list.append({'month': m, 'psi': float(psi_val), 'is_baseline': False})
-    
+    if has_months:
+        months = sorted(valid_months)
+        base_dist = get_dist(data_min_month, train_proba_bins)
+        for m in months:
+            if m == min_month:
+                psi_list.append({'month': m, 'psi': 0.0, 'is_baseline': True})
+                continue
+            curr_dist = get_dist(data_end[data_end['month_time'] == m], train_proba_bins)
+            b = np.clip(base_dist, 1e-6, 1)
+            c = np.clip(curr_dist, 1e-6, 1)
+            psi_val = np.sum((c - b) * np.log(c / b))
+            psi_list.append({'month': m, 'psi': float(psi_val), 'is_baseline': False})
+
     psi_df_month = pd.DataFrame(psi_list)
     
     # 训练集 vs OOT 的总 PSI
@@ -106,8 +104,8 @@ def generate_model_report(data_end, model, keep_lst, save_dir, model_id, res_dat
         'count': data_end[label_col].count(),
         'badrate': data_end[label_col].mean(),
         'badrate_weight': (data_end[label_col] * data_end['weight']).sum() / data_end['weight'].sum() if if_weight else 0,
-        'month_min': data_end['month_time'].min(),
-        'month_max': data_end['month_time'].max()
+        'month_min': data_end['month_time'].dropna().min() if has_months else None,
+        'month_max': data_end['month_time'].dropna().max() if has_months else None
     }, index=[0])
     df_list.append(temp_df)
 
@@ -115,6 +113,11 @@ def generate_model_report(data_end, model, keep_lst, save_dir, model_id, res_dat
         return (group[label_col] * group['weight']).sum() / group['weight'].sum()
 
     for col in [target_col, 'month_time']:
+        # 月度分组：当 month_time 全为空或只有 <=1 个有效值时跳过，避免生成重复或无意义行
+        if col == 'month_time':
+            unique_months = data_end[col].dropna().unique()
+            if len(unique_months) <= 1:
+                continue
         grouped = data_end.groupby(col).agg({label_col: ['count', 'mean'], 'month_time': ['min', 'max']}).reset_index()
         grouped.columns = ['dataset', 'count', 'badrate', 'month_min', 'month_max']
         if if_weight:
@@ -218,19 +221,24 @@ def generate_model_report(data_end, model, keep_lst, save_dir, model_id, res_dat
         
     if res_month is None:
         perf_list_m = []
-        for m in data_end['month_time'].unique():
-            td = data_end[data_end['month_time'] == m]
-            if not td.empty:
-                if td[label_col].nunique() > 1:
-                    auc = toad.metrics.AUC(td['proba'], td[label_col])
-                    ks = toad.metrics.KS(td['proba'], td[label_col])
-                else:
-                    auc = 0.5
-                    ks = 0.0
-                perf_list_m.append({'datasets': m, 'auc': auc, 'ks': ks})
+        if has_months:
+            for m in valid_months:
+                td = data_end[data_end['month_time'] == m]
+                if not td.empty:
+                    if td[label_col].nunique() > 1:
+                        auc = toad.metrics.AUC(td['proba'], td[label_col])
+                        ks = toad.metrics.KS(td['proba'], td[label_col])
+                    else:
+                        auc = 0.5
+                        ks = 0.0
+                    perf_list_m.append({'datasets': m, 'auc': auc, 'ks': ks})
         res_month = pd.DataFrame(perf_list_m)
 
-    model_performance_ks = pd.concat([res_data[['datasets','auc','ks']], res_month[['datasets','auc','ks']]])
+    perf_parts = [res_data[['datasets', 'auc', 'ks']]]
+    if res_month is not None and not res_month.empty:
+        perf_parts.append(res_month[['datasets', 'auc', 'ks']])
+    model_performance_ks = pd.concat(perf_parts, ignore_index=True)
+
 
     def calc_lift_group_v2(group):
         res = {}
@@ -243,10 +251,13 @@ def generate_model_report(data_end, model, keep_lst, save_dir, model_id, res_dat
         return pd.Series(res)
 
     result_data = data_end.groupby(target_col).apply(calc_lift_group_v2).reset_index()
-    result_month = data_end.groupby('month_time').apply(calc_lift_group_v2).reset_index()
     result_data.rename(columns={target_col: 'datasets'}, inplace=True)
-    result_month.rename(columns={'month_time': 'datasets'}, inplace=True)
-    model_performance_lift = pd.concat([result_data, result_month])
+    if has_months:
+        result_month = data_end.dropna(subset=['month_time']).groupby('month_time').apply(calc_lift_group_v2).reset_index()
+        result_month.rename(columns={'month_time': 'datasets'}, inplace=True)
+        model_performance_lift = pd.concat([result_data, result_month])
+    else:
+        model_performance_lift = result_data
     eval_df = pd.merge(model_performance_ks, model_performance_lift, on='datasets', how='left')
 
     # 导出 Excel
@@ -411,13 +422,28 @@ def run_report_task(db, task_id, progress_callback, project_id, model_result_id,
     if 'weight' not in data_end.columns:
         data_end['weight'] = 1.0
         
-    # 如果有月度列
     oot_col_name = split_config.get('oot_col')
+
     if oot_col_name and oot_col_name in data_end.columns:
-        data_end['month_time'] = pd.to_datetime(data_end[oot_col_name]).dt.to_period('M').astype(str)
+        # 与 data_processor.split_dataset 保持一致的三路转换
+        col_vals = data_end[oot_col_name].dropna()
+        if pd.api.types.is_datetime64_any_dtype(col_vals):
+            time_series = data_end[oot_col_name]
+        elif pd.api.types.is_numeric_dtype(col_vals):
+            sample = int(col_vals.iloc[0])
+            if 190001 <= sample <= 209912:
+                time_series = pd.to_datetime(data_end[oot_col_name].astype(int).astype(str), format='%Y%m')
+            elif 19000101 <= sample <= 20991231:
+                time_series = pd.to_datetime(data_end[oot_col_name].astype(int).astype(str), format='%Y%m%d')
+            else:
+                time_series = pd.to_datetime(data_end[oot_col_name], unit='s', errors='coerce')
+        else:
+            time_series = pd.to_datetime(data_end[oot_col_name], errors='coerce')
+        data_end['month_time'] = time_series.dt.to_period('M').astype(str)
     else:
-        # 默认使用创建时间或固定值
-        data_end['month_time'] = '2024-01'
+        # 无任何时间列：month_time 置空，月度分析将被跳过
+        data_end['month_time'] = None
+
 
     progress_callback(50, {"message": "完成指标计算，正在生成详细内容..."})
     

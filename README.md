@@ -336,4 +336,4 @@ erDiagram
 
 ---
 
-祝您建模体验愉快！如果有任何建议，请联系系统管理员或查阅 `/backend/scorecard_core/` 实现。
+祝您建模体验愉快！如果有任何建议，请联系系统管理员（17521157615）或查阅 `/backend/scorecard_core/` 实现。
